@@ -1,0 +1,82 @@
+const TILE_SIZE = 256;
+const TERRARIUM_URL = (z: number, x: number, y: number) =>
+  `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+
+export function lngLatToTile(lng: number, lat: number, zoom: number) {
+  const n = 2 ** zoom;
+  const x = ((lng + 180) / 360) * n;
+  const latRad = (lat * Math.PI) / 180;
+  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  return { x, y };
+}
+
+export function tileToLngLat(x: number, y: number, zoom: number) {
+  const n = 2 ** zoom;
+  const lng = (x / n) * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n)));
+  const lat = (latRad * 180) / Math.PI;
+  return { lng, lat };
+}
+
+export interface TileRange {
+  zoom: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/** Pick a zoom level whose tile pixel resolution is close to the requested output resolution for this bbox. */
+export function pickZoom(
+  bbox: [number, number, number, number],
+  targetResolution: number,
+  maxZoom = 14
+): number {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  for (let z = 1; z <= maxZoom; z++) {
+    const p1 = lngLatToTile(minLng, maxLat, z);
+    const p2 = lngLatToTile(maxLng, minLat, z);
+    const pixelsAcross = Math.abs(p2.x - p1.x) * TILE_SIZE;
+    if (pixelsAcross >= targetResolution) return z;
+  }
+  return maxZoom;
+}
+
+export function getTileRange(bbox: [number, number, number, number], zoom: number): TileRange {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const topLeft = lngLatToTile(minLng, maxLat, zoom);
+  const bottomRight = lngLatToTile(maxLng, minLat, zoom);
+  return {
+    zoom,
+    minX: Math.floor(topLeft.x),
+    maxX: Math.floor(bottomRight.x),
+    minY: Math.floor(topLeft.y),
+    maxY: Math.floor(bottomRight.y),
+  };
+}
+
+export interface FetchedTile {
+  x: number;
+  y: number;
+  buffer: ArrayBuffer;
+}
+
+export async function fetchTiles(range: TileRange): Promise<FetchedTile[]> {
+  const jobs: Promise<FetchedTile>[] = [];
+  for (let x = range.minX; x <= range.maxX; x++) {
+    for (let y = range.minY; y <= range.maxY; y++) {
+      jobs.push(
+        (async () => {
+          const res = await fetch(TERRARIUM_URL(range.zoom, x, y));
+          if (!res.ok) {
+            throw new Error(`Tile fetch failed for ${range.zoom}/${x}/${y}: ${res.status}`);
+          }
+          return { x, y, buffer: await res.arrayBuffer() };
+        })()
+      );
+    }
+  }
+  return Promise.all(jobs);
+}
+
+export const TILE_PIXEL_SIZE = TILE_SIZE;

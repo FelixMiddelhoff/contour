@@ -85,8 +85,8 @@ const RESOLUTIONS = [512, 1024, 2048, 4096] as const;
 const FORMATS = [
   { id: "png16", label: "16-bit PNG" },
   { id: "png8", label: "8-bit PNG" },
-  { id: "geotiff", label: "GeoTIFF (32-bit float)" },
   { id: "r16", label: "RAW .r16 (16-bit)" },
+  { id: "geotiff", label: "GeoTIFF (32-bit float) — coming soon", disabled: true },
 ] as const;
 
 function styleFor(id: BasemapId): maplibregl.StyleSpecification {
@@ -282,16 +282,33 @@ export default function MapView() {
         body: JSON.stringify({ bbox, format, resolution, normalization, sidecar }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `Export failed (${res.status})`);
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error ?? `Export failed (${res.status})`);
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `contour-heightmap.${format === "geotiff" ? "tif" : format === "r16" ? "r16" : "png"}`;
-      a.click();
-      URL.revokeObjectURL(url);
+
+      const ext = format === "geotiff" ? "tif" : format === "r16" ? "r16" : "png";
+      const contentType = res.headers.get("Content-Type") ?? "";
+
+      const download = (blob: Blob, name: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      if (contentType.includes("application/json")) {
+        const { image, contentType: imgType, sidecar: sidecarData } = await res.json();
+        const imgBytes = Uint8Array.from(atob(image), (c) => c.charCodeAt(0));
+        download(new Blob([imgBytes], { type: imgType }), `contour-heightmap.${ext}`);
+        download(
+          new Blob([JSON.stringify(sidecarData, null, 2)], { type: "application/json" }),
+          "contour-heightmap.json"
+        );
+      } else {
+        download(await res.blob(), `contour-heightmap.${ext}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
@@ -347,7 +364,7 @@ export default function MapView() {
           className="mb-3 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           {FORMATS.map((f) => (
-            <option key={f.id} value={f.id}>
+            <option key={f.id} value={f.id} disabled={"disabled" in f && f.disabled}>
               {f.label}
             </option>
           ))}
@@ -397,7 +414,7 @@ export default function MapView() {
         {BASEMAPS[basemap].sources[Object.keys(BASEMAPS[basemap].sources)[0]] &&
           (BASEMAPS[basemap].sources[Object.keys(BASEMAPS[basemap].sources)[0]] as maplibregl.RasterSourceSpecification)
             .attribution}
-        {" · Elevation: OpenFreeMap Terrain"}
+        {" · Elevation: Tilezen / AWS Terrain Tiles"}
       </div>
     </div>
   );
