@@ -120,6 +120,7 @@ export default function MapView() {
   const [sidecar, setSidecar] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showExportTooltip, setShowExportTooltip] = useState(false);
 
   const tooBig = sideKm * sideKm > MAX_AREA_KM2;
 
@@ -398,13 +399,25 @@ export default function MapView() {
           Include georeference sidecar (.json)
         </label>
 
-        <button
-          onClick={handleExport}
-          disabled={!bbox || tooBig || exporting}
-          className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
+        <div
+          className="relative"
+          onMouseEnter={() => setShowExportTooltip(true)}
+          onMouseLeave={() => setShowExportTooltip(false)}
         >
-          {exporting ? "Exporting…" : "Export"}
-        </button>
+          <button
+            onClick={handleExport}
+            disabled={!bbox || tooBig || exporting}
+            className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
+          >
+            {exporting ? "Exporting…" : "Export"}
+          </button>
+
+          {showExportTooltip && !bbox && (
+            <div className="absolute bottom-full left-1/2 mb-2 w-max max-w-56 -translate-x-1/2 rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-black">
+              Shift + drag on the map to select a region first
+            </div>
+          )}
+        </div>
 
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       </div>
