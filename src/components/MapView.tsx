@@ -346,13 +346,13 @@ export default function MapView() {
       if (contentType.includes("application/json")) {
         const { image, contentType: imgType, sidecar: sidecarData } = await res.json();
         const imgBytes = Uint8Array.from(atob(image), (c) => c.charCodeAt(0));
-        download(new Blob([imgBytes], { type: imgType }), `contour-heightmap.${ext}`);
+        download(new Blob([imgBytes], { type: imgType }), `heightmap.${ext}`);
         download(
           new Blob([JSON.stringify(sidecarData, null, 2)], { type: "application/json" }),
-          "contour-heightmap.json"
+          "heightmap.json"
         );
       } else {
-        download(await res.blob(), `contour-heightmap.${ext}`);
+        download(await res.blob(), `heightmap.${ext}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed");
