@@ -134,3 +134,17 @@ no separate implementation.
 # Deployment
 
 Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
+
+# Changelog
+
+- **v0.1.2** — Fixed occasional "fetch failed" export errors: tile fetches
+  now retry automatically on transient network blips, and any error that
+  still surfaces shows a clearer "try again" message instead of a raw
+  error.
+- **v0.1.1** — Fixed the desktop app returning "Export failed 500" on
+  every export. Cause: Next.js's default bundler (Turbopack) references
+  `sharp` in a way that breaks once packaged inside Electron's app
+  archive; the desktop build now uses webpack instead, which doesn't
+  have that problem.
+- **v0.1.0** — First desktop app release (Windows `.exe`, macOS `.dmg`).
+  Known broken — see v0.1.1.
