@@ -5,7 +5,7 @@ import { encodeExport, buildSidecar, type ExportFormat, type Normalization } fro
 
 const MAX_AREA_KM2 = 50 * 50;
 const KM_PER_DEG_LAT = 111.32;
-const VALID_FORMATS: ExportFormat[] = ["png16", "png8", "r16"];
+const VALID_FORMATS: ExportFormat[] = ["png16", "png8", "r16", "geotiff"];
 const VALID_RESOLUTIONS = [512, 1024, 2048, 4096];
 
 export async function POST(req: NextRequest) {
@@ -19,10 +19,7 @@ export async function POST(req: NextRequest) {
   if (!bbox || bbox.length !== 4) {
     return NextResponse.json({ error: "Missing or invalid bbox" }, { status: 400 });
   }
-  if (!format || (format === "geotiff" as string) || !VALID_FORMATS.includes(format)) {
-    if ((format as string) === "geotiff") {
-      return NextResponse.json({ error: "GeoTIFF export not implemented yet" }, { status: 501 });
-    }
+  if (!format || !VALID_FORMATS.includes(format)) {
     return NextResponse.json({ error: "Invalid format" }, { status: 400 });
   }
   if (!resolution || !VALID_RESOLUTIONS.includes(resolution)) {
@@ -39,7 +36,7 @@ export async function POST(req: NextRequest) {
   try {
     const zoom = pickZoom(bbox, resolution);
     const grid = await buildElevationGrid(bbox, zoom, resolution);
-    const { buffer, contentType } = await encodeExport(grid, format, normalization);
+    const { buffer, contentType } = await encodeExport(grid, format, normalization, bbox);
 
     if (!sidecar) {
       return new NextResponse(new Uint8Array(buffer), {

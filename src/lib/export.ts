@@ -1,7 +1,8 @@
 import type { ElevationGrid } from "./elevation";
 import { encodeGrayPng } from "./png";
+import { encodeFloatGeoTiff } from "./geotiff";
 
-export type ExportFormat = "png16" | "png8" | "r16";
+export type ExportFormat = "png16" | "png8" | "r16" | "geotiff";
 export type Normalization = "selection" | "fixed";
 
 const FIXED_SCALE_MAX = 9000; // meters, per design decision
@@ -22,8 +23,16 @@ function normalize(grid: ElevationGrid, mode: Normalization): Uint16Array {
 export async function encodeExport(
   grid: ElevationGrid,
   format: ExportFormat,
-  normalization: Normalization
+  normalization: Normalization,
+  bbox: [number, number, number, number]
 ): Promise<{ buffer: Buffer; contentType: string }> {
+  if (format === "geotiff") {
+    // GeoTIFF carries real elevation values (meters), not normalized 0-65535 —
+    // normalization doesn't apply, the raw floats are georeferenced instead.
+    const buffer = encodeFloatGeoTiff(grid.data, grid.width, grid.height, bbox);
+    return { buffer, contentType: "image/tiff" };
+  }
+
   const normalized = normalize(grid, normalization);
 
   if (format === "r16") {

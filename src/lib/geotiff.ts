@@ -1,0 +1,135 @@
+/**
+ * Minimal single-strip, uncompressed, 32-bit float GeoTIFF encoder.
+ * No external deps — writes the baseline TIFF tags plus the three GeoTIFF
+ * tags needed for a geographic (lat/lon, WGS84) raster: ModelPixelScale,
+ * ModelTiepoint, and GeoKeyDirectory.
+ */
+
+type TiffType = "SHORT" | "LONG" | "DOUBLE";
+const TYPE_CODE: Record<TiffType, number> = { SHORT: 3, LONG: 4, DOUBLE: 12 };
+
+interface Entry {
+  tag: number;
+  type: TiffType;
+  count: number;
+  inlineValue?: number; // used when count*typeSize <= 4
+  data?: Buffer; // used otherwise; offset filled in later
+}
+
+export function encodeFloatGeoTiff(
+  data: Float32Array,
+  width: number,
+  height: number,
+  bbox: [number, number, number, number]
+): Buffer {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const pixelScaleX = (maxLng - minLng) / width;
+  const pixelScaleY = (maxLat - minLat) / height;
+
+  const modelPixelScale = Buffer.alloc(24);
+  modelPixelScale.writeDoubleLE(pixelScaleX, 0);
+  modelPixelScale.writeDoubleLE(pixelScaleY, 8);
+  modelPixelScale.writeDoubleLE(0, 16);
+
+  // tiepoint: raster (0,0,0) -> model (minLng, maxLat, 0) — top-left / northwest corner
+  const modelTiepoint = Buffer.alloc(48);
+  modelTiepoint.writeDoubleLE(0, 0);
+  modelTiepoint.writeDoubleLE(0, 8);
+  modelTiepoint.writeDoubleLE(0, 16);
+  modelTiepoint.writeDoubleLE(minLng, 24);
+  modelTiepoint.writeDoubleLE(maxLat, 32);
+  modelTiepoint.writeDoubleLE(0, 40);
+
+  // GeoKeyDirectory: header {version,revision,minor,numKeys} + 3 keys x 4 shorts
+  const geoKeys = Buffer.alloc(32);
+  geoKeys.writeUInt16LE(1, 0); // KeyDirectoryVersion
+  geoKeys.writeUInt16LE(1, 2); // KeyRevision
+  geoKeys.writeUInt16LE(0, 4); // MinorRevision
+  geoKeys.writeUInt16LE(3, 6); // NumberOfKeys
+  // GTModelTypeGeoKey = 2 (Geographic)
+  geoKeys.writeUInt16LE(1024, 8);
+  geoKeys.writeUInt16LE(0, 10);
+  geoKeys.writeUInt16LE(1, 12);
+  geoKeys.writeUInt16LE(2, 14);
+  // GTRasterTypeGeoKey = 1 (RasterPixelIsArea)
+  geoKeys.writeUInt16LE(1025, 16);
+  geoKeys.writeUInt16LE(0, 18);
+  geoKeys.writeUInt16LE(1, 20);
+  geoKeys.writeUInt16LE(1, 22);
+  // GeographicTypeGeoKey = 4326 (WGS84)
+  geoKeys.writeUInt16LE(2048, 24);
+  geoKeys.writeUInt16LE(0, 26);
+  geoKeys.writeUInt16LE(1, 28);
+  geoKeys.writeUInt16LE(4326, 30);
+
+  const pixelData = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+
+  const entries: Entry[] = (
+    [
+      { tag: 256, type: "LONG", count: 1, inlineValue: width },
+      { tag: 257, type: "LONG", count: 1, inlineValue: height },
+      { tag: 258, type: "SHORT", count: 1, inlineValue: 32 },
+      { tag: 259, type: "SHORT", count: 1, inlineValue: 1 }, // no compression
+      { tag: 262, type: "SHORT", count: 1, inlineValue: 1 }, // BlackIsZero
+      { tag: 273, type: "LONG", count: 1, inlineValue: 0 }, // StripOffsets, filled below
+      { tag: 277, type: "SHORT", count: 1, inlineValue: 1 }, // SamplesPerPixel
+      { tag: 278, type: "LONG", count: 1, inlineValue: height }, // RowsPerStrip
+      { tag: 279, type: "LONG", count: 1, inlineValue: pixelData.length }, // StripByteCounts
+      { tag: 339, type: "SHORT", count: 1, inlineValue: 3 }, // SampleFormat: IEEE float
+      { tag: 33550, type: "DOUBLE", count: 3, data: modelPixelScale },
+      { tag: 33922, type: "DOUBLE", count: 6, data: modelTiepoint },
+      { tag: 34735, type: "SHORT", count: 16, data: geoKeys },
+    ] as Entry[]
+  ).sort((a, b) => a.tag - b.tag);
+
+  const ifdSize = 2 + entries.length * 12 + 4;
+  const ifdStart = 8;
+  let externalOffset = ifdStart + ifdSize;
+
+  for (const e of entries) {
+    if (e.data) {
+      (e as Entry & { offset: number }).offset = externalOffset;
+      externalOffset += e.data.length;
+      if (externalOffset % 2 === 1) externalOffset++; // word-align
+    }
+  }
+  const stripOffset = externalOffset;
+  const stripOffsetsEntry = entries.find((e) => e.tag === 273)!;
+  stripOffsetsEntry.inlineValue = stripOffset;
+
+  const header = Buffer.alloc(8);
+  header.write("II", 0, "ascii");
+  header.writeUInt16LE(42, 2);
+  header.writeUInt32LE(ifdStart, 4);
+
+  const ifd = Buffer.alloc(ifdSize);
+  ifd.writeUInt16LE(entries.length, 0);
+  let pos = 2;
+  for (const e of entries) {
+    ifd.writeUInt16LE(e.tag, pos);
+    ifd.writeUInt16LE(TYPE_CODE[e.type], pos + 2);
+    ifd.writeUInt32LE(e.count, pos + 4);
+    if (e.data) {
+      ifd.writeUInt32LE((e as Entry & { offset: number }).offset, pos + 8);
+    } else {
+      if (e.type === "SHORT") {
+        ifd.writeUInt16LE(e.inlineValue ?? 0, pos + 8);
+        ifd.writeUInt16LE(0, pos + 10);
+      } else {
+        ifd.writeUInt32LE(e.inlineValue ?? 0, pos + 8);
+      }
+    }
+    pos += 12;
+  }
+  ifd.writeUInt32LE(0, pos); // next IFD offset (none)
+
+  const externalChunks: Buffer[] = [];
+  for (const e of entries) {
+    if (e.data) {
+      externalChunks.push(e.data);
+      if (e.data.length % 2 === 1) externalChunks.push(Buffer.alloc(1));
+    }
+  }
+
+  return Buffer.concat([header, ifd, ...externalChunks, pixelData]);
+}

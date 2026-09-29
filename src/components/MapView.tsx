@@ -86,7 +86,7 @@ const FORMATS = [
   { id: "png16", label: "16-bit PNG" },
   { id: "png8", label: "8-bit PNG" },
   { id: "r16", label: "RAW .r16 (16-bit)" },
-  { id: "geotiff", label: "GeoTIFF (32-bit float) — coming soon", disabled: true },
+  { id: "geotiff", label: "GeoTIFF (32-bit float)" },
 ] as const;
 
 function styleFor(id: BasemapId): maplibregl.StyleSpecification {
@@ -365,7 +365,7 @@ export default function MapView() {
           className="mb-3 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           {FORMATS.map((f) => (
-            <option key={f.id} value={f.id} disabled={"disabled" in f && f.disabled}>
+            <option key={f.id} value={f.id}>
               {f.label}
             </option>
           ))}
