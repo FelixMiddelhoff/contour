@@ -16,9 +16,10 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
    at 50 km × 50 km.
 3. **Choose export options** in the panel on the right:
    - **Format** — 16-bit PNG (recommended, widest compatibility), 8-bit PNG
-     (lower precision), or RAW `.r16` (headerless 16-bit, for direct import
-     into engines like Unreal/CryEngine/World Machine). GeoTIFF is planned
-     but not available yet.
+     (lower precision), RAW `.r16` (headerless 16-bit, for direct import
+     into engines like Unreal/CryEngine/World Machine), or GeoTIFF (32-bit
+     float, real elevation values in meters, georeferenced WGS84 — for GIS
+     tools like QGIS).
    - **Resolution** — output image size (512–4096 px square).
    - **Normalization** — *Best contrast* stretches the selection's own
      min/max elevation across the full black-white range (sharpest detail,
