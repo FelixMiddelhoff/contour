@@ -6,6 +6,8 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
 
 **Live:** https://contour-swart.vercel.app
 
+**Download the desktop app** (no browser needed): see the [latest release](https://github.com/FelixMiddelhoff/contour/releases/latest) for Windows (.exe) and macOS Apple Silicon (.dmg) installers — see [Desktop app](#desktop-app) below for setup notes.
+
 Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below.
 
 ## How to use
