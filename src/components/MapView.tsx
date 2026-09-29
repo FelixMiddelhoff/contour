@@ -121,6 +121,9 @@ export default function MapView() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showExportTooltip, setShowExportTooltip] = useState(false);
+  const [elevationStats, setElevationStats] = useState<{ min: number; max: number } | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const tooBig = sideKm * sideKm > MAX_AREA_KM2;
 
@@ -272,6 +275,36 @@ export default function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
+  useEffect(() => {
+    if (!bbox || tooBig) {
+      setElevationStats(null);
+      return;
+    }
+    let cancelled = false;
+    setStatsLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/elevation-stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bbox }),
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setElevationStats({ min: data.min, max: data.max });
+      } catch {
+        if (!cancelled) setElevationStats(null);
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bbox, tooBig]);
+
   async function handleExport() {
     if (!bbox) return;
     setExporting(true);
@@ -347,13 +380,53 @@ export default function MapView() {
 
       {/* Export panel */}
       <div className="absolute top-3 right-3 w-64 rounded-xl bg-white/95 p-4 shadow-lg backdrop-blur dark:bg-black/80">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">Export heightmap</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Export heightmap</h2>
+          <div className="relative">
+            <button
+              onClick={() => setShowHelp((v) => !v)}
+              aria-label="How to use"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 text-[11px] font-semibold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              ?
+            </button>
+            {showHelp && (
+              <div className="absolute right-0 top-full z-10 mt-2 w-72 rounded-lg bg-white p-3 text-xs leading-relaxed text-zinc-700 shadow-xl dark:bg-zinc-900 dark:text-zinc-300">
+                <p className="mb-2 font-semibold text-zinc-900 dark:text-zinc-100">How to use</p>
+                <ol className="list-decimal space-y-1.5 pl-4">
+                  <li>Pick a basemap (top-left) to help find your region.</li>
+                  <li>Hold <strong>Shift</strong> and drag on the map to select a square (max 50 km).</li>
+                  <li>Choose format, resolution, and normalization below.</li>
+                  <li>Click <strong>Export</strong> to download.</li>
+                </ol>
+                <p className="mt-2 text-zinc-500 dark:text-zinc-400">
+                  GeoTIFF stores raw elevation in meters (not 0–1), so it looks
+                  solid white in plain image viewers — open it in a GIS tool
+                  (QGIS, gdal) instead.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
 
         {bbox ? (
-          <p className={`mb-3 text-xs ${tooBig ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"}`}>
-            {sideKm.toFixed(1)} km × {sideKm.toFixed(1)} km
-            {tooBig && ` — exceeds ${Math.round(Math.sqrt(MAX_AREA_KM2))}km max`}
-          </p>
+          <>
+            <p className={`text-xs ${tooBig ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+              {sideKm.toFixed(1)} km × {sideKm.toFixed(1)} km
+              {tooBig && ` — exceeds ${Math.round(Math.sqrt(MAX_AREA_KM2))}km max`}
+            </p>
+            {!tooBig && (
+              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+                Elevation:{" "}
+                {statsLoading && !elevationStats
+                  ? "…"
+                  : elevationStats
+                  ? `${Math.round(elevationStats.min)}–${Math.round(elevationStats.max)} m`
+                  : "—"}
+              </p>
+            )}
+            {tooBig && <div className="mb-3" />}
+          </>
         ) : (
           <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">No region selected</p>
         )}
