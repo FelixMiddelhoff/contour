@@ -61,19 +61,36 @@ export interface FetchedTile {
   buffer: ArrayBuffer;
 }
 
+const MAX_RETRIES = 3;
+
+async function fetchTileWithRetry(zoom: number, x: number, y: number): Promise<FetchedTile> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(TERRARIUM_URL(zoom, x, y));
+      if (!res.ok) {
+        throw new Error(`Tile fetch failed for ${zoom}/${x}/${y}: ${res.status}`);
+      }
+      return { x, y, buffer: await res.arrayBuffer() };
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        // transient network blips (fetch failed, timeout, S3 hiccup) are common —
+        // a short backoff and retry clears most of them without bothering the user
+        await new Promise((resolve) => setTimeout(resolve, attempt * 300));
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Tile fetch failed for ${zoom}/${x}/${y}`);
+}
+
 export async function fetchTiles(range: TileRange): Promise<FetchedTile[]> {
   const jobs: Promise<FetchedTile>[] = [];
   for (let x = range.minX; x <= range.maxX; x++) {
     for (let y = range.minY; y <= range.maxY; y++) {
-      jobs.push(
-        (async () => {
-          const res = await fetch(TERRARIUM_URL(range.zoom, x, y));
-          if (!res.ok) {
-            throw new Error(`Tile fetch failed for ${range.zoom}/${x}/${y}: ${res.status}`);
-          }
-          return { x, y, buffer: await res.arrayBuffer() };
-        })()
-      );
+      jobs.push(fetchTileWithRetry(range.zoom, x, y));
     }
   }
   return Promise.all(jobs);

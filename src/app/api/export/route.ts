@@ -57,7 +57,17 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error(err);
-    const message = err instanceof Error ? err.message : "Export failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: friendlyErrorMessage(err) }, { status: 500 });
   }
+}
+
+function friendlyErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  const isNetworkGlitch = /fetch failed|tile fetch failed|ECONNRESET|ETIMEDOUT|timeout/i.test(
+    message
+  );
+  if (isNetworkGlitch) {
+    return "Temporary network error fetching elevation data — please try exporting again.";
+  }
+  return message || "Export failed — please try again.";
 }
