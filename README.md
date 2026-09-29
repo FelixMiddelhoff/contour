@@ -97,6 +97,23 @@ Transport Fever 3 processes maps through an interactive visual system.
 
 > This has yet to be tested once the game has been released!!
 
+# Desktop app
+
+Prefer not to use a browser? Download a standalone desktop version — same
+app, no npm or terminal needed. Still needs an internet connection to load
+map tiles and elevation data.
+
+- **Windows**: run the `.exe` installer, or build it yourself with
+  `npm run electron:build:win` (produces `dist/contour Setup *.exe`).
+- **macOS**: `.dmg` is unsigned (no Apple Developer certificate), so
+  Gatekeeper blocks the first launch — right-click the app → **Open** to
+  bypass it, or allow it under System Settings → Privacy & Security.
+  Apple Silicon (arm64) only for now.
+
+Both are built automatically by `.github/workflows/build-desktop.yml` on
+GitHub Actions (manually via "Run workflow", or by pushing a `v*` tag) —
+download the artifacts from the workflow run.
+
 # Development
 
 ```bash
@@ -108,7 +125,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Stack: Next.js (App Router) + MapLibre GL JS for the map, a small
 tile-fetch/decode/resample pipeline in `src/lib/`, and a hand-rolled PNG
-encoder (`src/lib/png.ts`) for correct 16-bit grayscale output.
+encoder (`src/lib/png.ts`) for correct 16-bit grayscale output. The desktop
+app (`electron/main.cjs`) runs this same Next.js app locally via Electron —
+no separate implementation.
 
 # Deployment
 
