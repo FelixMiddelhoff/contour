@@ -6,6 +6,8 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
 
 **Live:** https://contour-swart.vercel.app
 
+Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below.
+
 ## How to use
 
 1. **Pick a basemap.** Use the switcher top-left — Streets, Topo, Satellite,
@@ -48,7 +50,54 @@ Elevation data comes from the Tilezen/AWS Terrarium tile dataset (free,
 global, no API key). Ocean and other below-sea-level areas are flattened to
 0 (black).
 
-## Development
+# Transport Fever 3
+This is what google got me:
+## Importing Custom Heightmaps into Transport Fever 3
+
+Step-by-step guide to importing custom heightmaps using the updated creation workflow.
+
+## Phase 1: Prepare Your Heightmap Data
+
+Before opening the game, you need a high-quality topographical image.
+
+- **Format:** Save the file as a grayscale `.png` or `.tif`.
+- **Color depth:** Use 16-bit grayscale if possible. This prevents "staircasing" (sharp, pixelated ridges) on mountains.
+- **Dimensions:** The image must be perfectly square. Standard sizes are `1025x1025`, `2049x2049`, or `4097x4097` pixels, depending on the desired map scale.
+
+## Phase 2: Direct Folder Import (Classic Method)
+
+The fastest way to make your file visible in the game's menu is to place it in the user directory.
+
+1. Navigate to your Transport Fever 3 user directory. For Steam users this is typically:
+
+   ```
+   ...\Steam\userdata\[YourSteamID]\1845190\local\maps\
+   ```
+
+   > **Note:** The exact Steam AppID folder number may vary based on final game build paths.
+
+2. Create a new folder inside `maps` and name it after your project (e.g. `MyCustomMap`).
+3. Rename your image file to exactly `heightmap.png` (or `heightmap.tif`).
+4. Paste the file into the new folder.
+
+## Phase 3: Loading and Tuning in the Map Editor
+
+Transport Fever 3 processes maps through an interactive visual system.
+
+1. Launch Transport Fever 3 and select **Map Editor** from the main menu.
+2. Click **Create New Map** and choose your climate, vehicle set, and starting year.
+3. In the generator window, find the **Generation Nodes / Pipeline** panel.
+4. Click **Add Node** and select the **Heightmap / Image Input Node**.
+5. In the node's properties, click the file browser icon and select your custom folder/file from Phase 2.
+6. *(Optional but recommended)* Chain additional nodes:
+   - Connect an **Erosion Node** to smooth rough real-world edges.
+   - Connect a **Water/River Node** to carve realistic riverbeds into the imported topography.
+7. Adjust the **Height Scale** slider in the import node to set the distance between the lowest valleys and highest peaks.
+8. Click **Generate Preview** to view the 3D render. Click **Save** once you are satisfied with the layout.
+
+> This has yet to be tested once the game has been released!!
+
+# Development
 
 ```bash
 npm install
@@ -61,6 +110,6 @@ Stack: Next.js (App Router) + MapLibre GL JS for the map, a small
 tile-fetch/decode/resample pipeline in `src/lib/`, and a hand-rolled PNG
 encoder (`src/lib/png.ts`) for correct 16-bit grayscale output.
 
-## Deployment
+# Deployment
 
 Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
