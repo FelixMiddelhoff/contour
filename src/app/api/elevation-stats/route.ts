@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pickZoom } from "@/lib/tiles";
 import { buildElevationGrid } from "@/lib/elevation";
+import type { RotatedSquare } from "@/lib/geo";
 
 // coarse resolution — this is just for a quick min/max readout, not the export itself
 const STATS_RESOLUTION = 64;
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
-  const bbox = body?.bbox as [number, number, number, number] | undefined;
+  const square = body?.square as RotatedSquare | undefined;
 
-  if (!bbox || bbox.length !== 4) {
-    return NextResponse.json({ error: "Missing or invalid bbox" }, { status: 400 });
+  if (!square || typeof square.centerLng !== "number" || typeof square.sideKm !== "number") {
+    return NextResponse.json({ error: "Missing or invalid square" }, { status: 400 });
   }
 
   try {
-    const zoom = pickZoom(bbox, STATS_RESOLUTION);
-    const grid = await buildElevationGrid(bbox, zoom, STATS_RESOLUTION);
+    const grid = await buildElevationGrid(square, STATS_RESOLUTION);
     return NextResponse.json({ min: grid.min, max: grid.max });
   } catch (err) {
     console.error(err);

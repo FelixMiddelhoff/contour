@@ -1,6 +1,7 @@
 import type { ElevationGrid } from "./elevation";
 import { encodeGrayPng } from "./png";
 import { encodeFloatGeoTiff } from "./geotiff";
+import { squareCorners, type RotatedSquare } from "./geo";
 
 export type ExportFormat = "png16" | "png8" | "r16" | "geotiff";
 export type Normalization = "selection" | "fixed";
@@ -24,12 +25,12 @@ export async function encodeExport(
   grid: ElevationGrid,
   format: ExportFormat,
   normalization: Normalization,
-  bbox: [number, number, number, number]
+  square: RotatedSquare
 ): Promise<{ buffer: Buffer; contentType: string }> {
   if (format === "geotiff") {
     // GeoTIFF carries real elevation values (meters), not normalized 0-65535 —
     // normalization doesn't apply, the raw floats are georeferenced instead.
-    const buffer = encodeFloatGeoTiff(grid.data, grid.width, grid.height, bbox);
+    const buffer = encodeFloatGeoTiff(grid.data, grid.width, grid.height, square);
     return { buffer, contentType: "image/tiff" };
   }
 
@@ -57,13 +58,17 @@ export async function encodeExport(
 }
 
 export function buildSidecar(
-  bbox: [number, number, number, number],
+  square: RotatedSquare,
   grid: ElevationGrid,
   format: ExportFormat,
   normalization: Normalization
 ) {
+  const corners = squareCorners(square);
   return {
-    bbox: { minLng: bbox[0], minLat: bbox[1], maxLng: bbox[2], maxLat: bbox[3] },
+    center: { lng: square.centerLng, lat: square.centerLat },
+    sideKm: square.sideKm,
+    rotationDeg: square.rotationDeg,
+    corners: { nw: corners[0], ne: corners[1], se: corners[2], sw: corners[3] },
     resolution: { width: grid.width, height: grid.height },
     elevationMeters: { min: grid.min, max: grid.max },
     normalization,

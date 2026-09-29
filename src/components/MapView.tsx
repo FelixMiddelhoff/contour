@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { squareCorners, localToLngLat, kmPerDegLng, KM_PER_DEG_LAT, type RotatedSquare } from "@/lib/geo";
 
 type BasemapId = "osm" | "topo" | "satellite" | "satellite-hillshade";
 
@@ -98,22 +99,25 @@ function styleFor(id: BasemapId): maplibregl.StyleSpecification {
   } as maplibregl.StyleSpecification;
 }
 
-// haversine-based square side length in km for a given lng/lat delta at a center lat
-function kmPerDegLng(lat: number) {
-  return 111.32 * Math.cos((lat * Math.PI) / 180);
+function squareToGeoJSON(square: RotatedSquare): GeoJSON.Feature<GeoJSON.Polygon> {
+  const corners = squareCorners(square).map((c) => [c.lng, c.lat] as [number, number]);
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates: [[...corners, corners[0]]] },
+  };
 }
-const KM_PER_DEG_LAT = 111.32;
 
 export default function MapView() {
   const mapDiv = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
+  const rotateMarkerRef = useRef<maplibregl.Marker | null>(null);
   const drawingRef = useRef(false);
   const startLngLatRef = useRef<{ lng: number; lat: number } | null>(null);
   const isFirstBasemapRender = useRef(true);
 
   const [basemap, setBasemap] = useState<BasemapId>("osm");
-  const [bbox, setBbox] = useState<[number, number, number, number] | null>(null); // [minLng, minLat, maxLng, maxLat]
-  const [sideKm, setSideKm] = useState(0);
+  const [square, setSquare] = useState<RotatedSquare | null>(null);
   const [format, setFormat] = useState<(typeof FORMATS)[number]["id"]>("png16");
   const [resolution, setResolution] = useState<(typeof RESOLUTIONS)[number]>(2048);
   const [normalization, setNormalization] = useState<"selection" | "fixed">("selection");
@@ -125,46 +129,73 @@ export default function MapView() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
-  const tooBig = sideKm * sideKm > MAX_AREA_KM2;
+  const tooBig = square !== null && square.sideKm * square.sideKm > MAX_AREA_KM2;
 
-  const drawSquare = useCallback((map: MLMap, start: { lng: number; lat: number }, cur: { lng: number; lat: number }) => {
-    // constrain to a square in km-space, anchored at start
-    const kmPerLng = kmPerDegLng(start.lat);
-    const dxKm = (cur.lng - start.lng) * kmPerLng;
-    const dyKm = (cur.lat - start.lat) * KM_PER_DEG_LAT;
-    const side = Math.max(Math.abs(dxKm), Math.abs(dyKm));
-    const signX = dxKm >= 0 ? 1 : -1;
-    const signY = dyKm >= 0 ? 1 : -1;
-    const endLng = start.lng + (signX * side) / kmPerLng;
-    const endLat = start.lat + (signY * side) / KM_PER_DEG_LAT;
-
-    const minLng = Math.min(start.lng, endLng);
-    const maxLng = Math.max(start.lng, endLng);
-    const minLat = Math.min(start.lat, endLat);
-    const maxLat = Math.max(start.lat, endLat);
-
-    setBbox([minLng, minLat, maxLng, maxLat]);
-    setSideKm(side);
-
+  const renderSelection = useCallback((map: MLMap, sq: RotatedSquare) => {
     const src = map.getSource("selection") as maplibregl.GeoJSONSource | undefined;
-    const geojson: GeoJSON.Feature<GeoJSON.Polygon> = {
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "Polygon",
-        coordinates: [
-          [
-            [minLng, minLat],
-            [maxLng, minLat],
-            [maxLng, maxLat],
-            [minLng, maxLat],
-            [minLng, minLat],
-          ],
-        ],
-      },
-    };
-    if (src) src.setData(geojson);
+    if (src) src.setData(squareToGeoJSON(sq));
+
+    const handlePos = localToLngLat(sq, 0, sq.sideKm / 2);
+    if (!rotateMarkerRef.current) {
+      const el = document.createElement("div");
+      el.style.width = "14px";
+      el.style.height = "14px";
+      el.style.borderRadius = "50%";
+      el.style.background = "#22c55e";
+      el.style.border = "2px solid white";
+      el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.4)";
+      el.style.cursor = "grab";
+      const marker = new maplibregl.Marker({ element: el, draggable: true })
+        .setLngLat([handlePos.lng, handlePos.lat])
+        .addTo(map);
+      marker.on("drag", () => {
+        const cur = marker.getLngLat();
+        setSquare((prevSq) => {
+          if (!prevSq) return prevSq;
+          const kmLng = kmPerDegLng(prevSq.centerLat);
+          const dx = (cur.lng - prevSq.centerLng) * kmLng;
+          const dy = (cur.lat - prevSq.centerLat) * KM_PER_DEG_LAT;
+          const rotationDeg = (Math.atan2(-dx, dy) * 180) / Math.PI;
+          const next = { ...prevSq, rotationDeg };
+
+          // update the polygon + marker position imperatively right away —
+          // no need to go through renderSelection again for a rotation-only change
+          const constrainedPos = localToLngLat(next, 0, next.sideKm / 2);
+          marker.setLngLat([constrainedPos.lng, constrainedPos.lat]);
+          const m = mapRef.current;
+          const src = m?.getSource("selection") as maplibregl.GeoJSONSource | undefined;
+          if (src) src.setData(squareToGeoJSON(next));
+
+          return next;
+        });
+      });
+      rotateMarkerRef.current = marker;
+    } else {
+      rotateMarkerRef.current.setLngLat([handlePos.lng, handlePos.lat]);
+    }
   }, []);
+
+  const drawSquare = useCallback(
+    (map: MLMap, start: { lng: number; lat: number }, cur: { lng: number; lat: number }) => {
+      // constrain to a square in km-space, anchored at start
+      const kmPerLng = kmPerDegLng(start.lat);
+      const dxKm = (cur.lng - start.lng) * kmPerLng;
+      const dyKm = (cur.lat - start.lat) * KM_PER_DEG_LAT;
+      const side = Math.max(Math.abs(dxKm), Math.abs(dyKm));
+      const signX = dxKm >= 0 ? 1 : -1;
+      const signY = dyKm >= 0 ? 1 : -1;
+      const endLng = start.lng + (signX * side) / kmPerLng;
+      const endLat = start.lat + (signY * side) / KM_PER_DEG_LAT;
+
+      const centerLng = (start.lng + endLng) / 2;
+      const centerLat = (start.lat + endLat) / 2;
+      const sq: RotatedSquare = { centerLng, centerLat, sideKm: side, rotationDeg: 0 };
+
+      setSquare(sq);
+      renderSelection(map, sq);
+    },
+    [renderSelection]
+  );
 
   useEffect(() => {
     if (!mapDiv.current || mapRef.current) return;
@@ -194,8 +225,6 @@ export default function MapView() {
         paint: { "line-color": "#22c55e", "line-width": 2 },
       });
     });
-
-    const canvas = map.getCanvasContainer();
 
     const onMouseDown = (e: maplibregl.MapMouseEvent) => {
       if (!e.originalEvent.shiftKey) return; // shift+drag to draw, so normal pan still works
@@ -239,24 +268,7 @@ export default function MapView() {
       if (!map.getSource("selection")) {
         map.addSource("selection", {
           type: "geojson",
-          data: bbox
-            ? {
-                type: "Feature",
-                properties: {},
-                geometry: {
-                  type: "Polygon",
-                  coordinates: [
-                    [
-                      [bbox[0], bbox[1]],
-                      [bbox[2], bbox[1]],
-                      [bbox[2], bbox[3]],
-                      [bbox[0], bbox[3]],
-                      [bbox[0], bbox[1]],
-                    ],
-                  ],
-                },
-              }
-            : { type: "FeatureCollection", features: [] },
+          data: square ? squareToGeoJSON(square) : { type: "FeatureCollection", features: [] },
         });
         map.addLayer({
           id: "selection-fill",
@@ -270,24 +282,24 @@ export default function MapView() {
           source: "selection",
           paint: { "line-color": "#22c55e", "line-width": 2 },
         });
+        if (square) renderSelection(map, square);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
   useEffect(() => {
-    if (!bbox || tooBig) {
-      setElevationStats(null);
-      return;
-    }
+    // stale elevationStats from a previous selection is harmless here — the
+    // JSX only ever displays it while `square && !tooBig`, same guard as below
+    if (!square || tooBig) return;
     let cancelled = false;
-    setStatsLoading(true);
     const timer = setTimeout(async () => {
+      setStatsLoading(true);
       try {
         const res = await fetch("/api/elevation-stats", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bbox }),
+          body: JSON.stringify({ square }),
         });
         if (!res.ok || cancelled) return;
         const data = await res.json();
@@ -302,18 +314,17 @@ export default function MapView() {
       cancelled = true;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bbox, tooBig]);
+  }, [square, tooBig]);
 
   async function handleExport() {
-    if (!bbox) return;
+    if (!square) return;
     setExporting(true);
     setError(null);
     try {
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bbox, format, resolution, normalization, sidecar }),
+        body: JSON.stringify({ square, format, resolution, normalization, sidecar }),
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
@@ -372,9 +383,14 @@ export default function MapView() {
       </div>
 
       {/* Hint */}
-      {!bbox && (
+      {!square && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-lg bg-white/90 px-3 py-1.5 text-xs text-zinc-600 shadow backdrop-blur dark:bg-black/70 dark:text-zinc-300">
           Shift + drag to select a square region
+        </div>
+      )}
+      {square && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-lg bg-white/90 px-3 py-1.5 text-xs text-zinc-600 shadow backdrop-blur dark:bg-black/70 dark:text-zinc-300">
+          Drag the green dot to rotate the selection
         </div>
       )}
 
@@ -396,6 +412,7 @@ export default function MapView() {
                 <ol className="list-decimal space-y-1.5 pl-4">
                   <li>Pick a basemap (top-left) to help find your region.</li>
                   <li>Hold <strong>Shift</strong> and drag on the map to select a square (max 50 km).</li>
+                  <li>Drag the green dot to rotate the selection, if needed.</li>
                   <li>Choose format, resolution, and normalization below.</li>
                   <li>Click <strong>Export</strong> to download.</li>
                 </ol>
@@ -409,11 +426,13 @@ export default function MapView() {
           </div>
         </div>
 
-        {bbox ? (
+        {square ? (
           <>
             <p className={`text-xs ${tooBig ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"}`}>
-              {sideKm.toFixed(1)} km × {sideKm.toFixed(1)} km
+              {square.sideKm.toFixed(1)} km × {square.sideKm.toFixed(1)} km
               {tooBig && ` — exceeds ${Math.round(Math.sqrt(MAX_AREA_KM2))}km max`}
+              {" · "}
+              {Math.round(((square.rotationDeg % 360) + 360) % 360)}°
             </p>
             {!tooBig && (
               <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
@@ -479,13 +498,13 @@ export default function MapView() {
         >
           <button
             onClick={handleExport}
-            disabled={!bbox || tooBig || exporting}
+            disabled={!square || tooBig || exporting}
             className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
           >
             {exporting ? "Exporting…" : "Export"}
           </button>
 
-          {showExportTooltip && !bbox && (
+          {showExportTooltip && !square && (
             <div className="absolute bottom-full left-1/2 mb-2 w-max max-w-56 -translate-x-1/2 rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-white dark:text-black">
               Shift + drag on the map to select a region first
             </div>

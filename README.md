@@ -12,9 +12,12 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
    or Satellite + Relief — to help you find the region you want. These are
    just for navigation; they aren't part of the exported data.
 2. **Select a region.** Hold **Shift** and drag on the map to draw a square.
-   The live size (km × km) shows in the export panel. Selections are capped
-   at 50 km × 50 km.
-3. **Choose export options** in the panel on the right:
+   The live size (km × km) and elevation range show in the export panel.
+   Selections are capped at 50 km × 50 km.
+3. **Rotate it, if needed.** Drag the green dot at the top of the square to
+   rotate the selection to any angle. The exported image is always a plain
+   upright square — rotation just changes which ground it covers.
+4. **Choose export options** in the panel on the right:
    - **Format** — 16-bit PNG (recommended, widest compatibility), 8-bit PNG
      (lower precision), RAW `.r16` (headerless 16-bit, for direct import
      into engines like Unreal/CryEngine/World Machine), or GeoTIFF (32-bit
@@ -24,7 +27,8 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
      so opening it in Windows Photos, a browser, or any plain image viewer
      will show solid white — those tools assume float pixels are already
      in 0–1 and everything clips. Open it in a GIS tool instead, where you
-     set your own display stretch.
+     set your own display stretch. Rotated selections are georeferenced
+     correctly via a full affine transform.
    - **Resolution** — output image size (512–4096 px square).
    - **Normalization** — *Best contrast* stretches the selection's own
      min/max elevation across the full black-white range (sharpest detail,
@@ -35,7 +39,7 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
    - **Georeference sidecar** — optional `.json` with the exact bounding
      box, resolution, elevation min/max, and normalization used, for
      reimporting with real-world scale.
-4. Click **Export** to download the file.
+5. Click **Export** to download the file.
 
 Elevation data comes from the Tilezen/AWS Terrarium tile dataset (free,
 global, no API key). Ocean and other below-sea-level areas are flattened to

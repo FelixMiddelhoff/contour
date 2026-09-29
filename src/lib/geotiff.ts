@@ -1,9 +1,11 @@
 /**
  * Minimal single-strip, uncompressed, 32-bit float GeoTIFF encoder.
- * No external deps — writes the baseline TIFF tags plus the three GeoTIFF
- * tags needed for a geographic (lat/lon, WGS84) raster: ModelPixelScale,
- * ModelTiepoint, and GeoKeyDirectory.
+ * No external deps — writes the baseline TIFF tags plus GeoTIFF's
+ * ModelTransformationTag (a full affine transform, which represents a
+ * rotated raster as well as a plain north-up one) and GeoKeyDirectory for
+ * a geographic (lat/lon, WGS84) raster.
  */
+import { KM_PER_DEG_LAT, kmPerDegLng, type RotatedSquare } from "./geo";
 
 type TiffType = "SHORT" | "LONG" | "DOUBLE";
 const TYPE_CODE: Record<TiffType, number> = { SHORT: 3, LONG: 4, DOUBLE: 12 };
@@ -12,33 +14,41 @@ interface Entry {
   tag: number;
   type: TiffType;
   count: number;
-  inlineValue?: number; // used when count*typeSize <= 4
-  data?: Buffer; // used otherwise; offset filled in later
+  inlineValue?: number;
+  data?: Buffer;
+}
+
+/** Affine transform (raster col,row -> model lng,lat) for a possibly-rotated square. */
+function buildAffine(square: RotatedSquare, width: number, height: number): number[] {
+  const half = square.sideKm / 2;
+  const theta = (square.rotationDeg * Math.PI) / 180;
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+  const kmLng = kmPerDegLng(square.centerLat);
+  const sx = square.sideKm / width;
+  const sy = square.sideKm / height;
+
+  const a0 = (sx * cosT) / kmLng;
+  const a1 = (sy * sinT) / kmLng;
+  const a3 = square.centerLng - (half * (cosT + sinT)) / kmLng;
+
+  const b0 = (sx * sinT) / KM_PER_DEG_LAT;
+  const b1 = (-sy * cosT) / KM_PER_DEG_LAT;
+  const b3 = square.centerLat + (half * (cosT - sinT)) / KM_PER_DEG_LAT;
+
+  // row-major 4x4: [a0 a1 0 a3; b0 b1 0 b3; 0 0 0 0; 0 0 0 1]
+  return [a0, a1, 0, a3, b0, b1, 0, b3, 0, 0, 0, 0, 0, 0, 0, 1];
 }
 
 export function encodeFloatGeoTiff(
   data: Float32Array,
   width: number,
   height: number,
-  bbox: [number, number, number, number]
+  square: RotatedSquare
 ): Buffer {
-  const [minLng, minLat, maxLng, maxLat] = bbox;
-  const pixelScaleX = (maxLng - minLng) / width;
-  const pixelScaleY = (maxLat - minLat) / height;
-
-  const modelPixelScale = Buffer.alloc(24);
-  modelPixelScale.writeDoubleLE(pixelScaleX, 0);
-  modelPixelScale.writeDoubleLE(pixelScaleY, 8);
-  modelPixelScale.writeDoubleLE(0, 16);
-
-  // tiepoint: raster (0,0,0) -> model (minLng, maxLat, 0) — top-left / northwest corner
-  const modelTiepoint = Buffer.alloc(48);
-  modelTiepoint.writeDoubleLE(0, 0);
-  modelTiepoint.writeDoubleLE(0, 8);
-  modelTiepoint.writeDoubleLE(0, 16);
-  modelTiepoint.writeDoubleLE(minLng, 24);
-  modelTiepoint.writeDoubleLE(maxLat, 32);
-  modelTiepoint.writeDoubleLE(0, 40);
+  const affineValues = buildAffine(square, width, height);
+  const modelTransformation = Buffer.alloc(128);
+  affineValues.forEach((v, i) => modelTransformation.writeDoubleLE(v, i * 8));
 
   // GeoKeyDirectory: header {version,revision,minor,numKeys} + 3 keys x 4 shorts
   const geoKeys = Buffer.alloc(32);
@@ -46,21 +56,18 @@ export function encodeFloatGeoTiff(
   geoKeys.writeUInt16LE(1, 2); // KeyRevision
   geoKeys.writeUInt16LE(0, 4); // MinorRevision
   geoKeys.writeUInt16LE(3, 6); // NumberOfKeys
-  // GTModelTypeGeoKey = 2 (Geographic)
-  geoKeys.writeUInt16LE(1024, 8);
+  geoKeys.writeUInt16LE(1024, 8); // GTModelTypeGeoKey
   geoKeys.writeUInt16LE(0, 10);
   geoKeys.writeUInt16LE(1, 12);
-  geoKeys.writeUInt16LE(2, 14);
-  // GTRasterTypeGeoKey = 1 (RasterPixelIsArea)
-  geoKeys.writeUInt16LE(1025, 16);
+  geoKeys.writeUInt16LE(2, 14); // Geographic
+  geoKeys.writeUInt16LE(1025, 16); // GTRasterTypeGeoKey
   geoKeys.writeUInt16LE(0, 18);
   geoKeys.writeUInt16LE(1, 20);
-  geoKeys.writeUInt16LE(1, 22);
-  // GeographicTypeGeoKey = 4326 (WGS84)
-  geoKeys.writeUInt16LE(2048, 24);
+  geoKeys.writeUInt16LE(1, 22); // RasterPixelIsArea
+  geoKeys.writeUInt16LE(2048, 24); // GeographicTypeGeoKey
   geoKeys.writeUInt16LE(0, 26);
   geoKeys.writeUInt16LE(1, 28);
-  geoKeys.writeUInt16LE(4326, 30);
+  geoKeys.writeUInt16LE(4326, 30); // WGS84
 
   const pixelData = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
 
@@ -76,8 +83,7 @@ export function encodeFloatGeoTiff(
       { tag: 278, type: "LONG", count: 1, inlineValue: height }, // RowsPerStrip
       { tag: 279, type: "LONG", count: 1, inlineValue: pixelData.length }, // StripByteCounts
       { tag: 339, type: "SHORT", count: 1, inlineValue: 3 }, // SampleFormat: IEEE float
-      { tag: 33550, type: "DOUBLE", count: 3, data: modelPixelScale },
-      { tag: 33922, type: "DOUBLE", count: 6, data: modelTiepoint },
+      { tag: 34264, type: "DOUBLE", count: 16, data: modelTransformation },
       { tag: 34735, type: "SHORT", count: 16, data: geoKeys },
     ] as Entry[]
   ).sort((a, b) => a.tag - b.tag);
