@@ -13,7 +13,10 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
    just for navigation; they aren't part of the exported data.
 2. **Select a region.** Hold **Shift** and drag on the map to draw a square.
    The live size (km × km) and elevation range show in the export panel.
-   Selections are capped at 50 km × 50 km.
+   Selections are capped at 100 km × 100 km. Bigger regions cover more
+   ground per pixel at the same resolution, so detail drops off as the
+   selection grows — pick a higher resolution or a smaller area for
+   sharper output.
 3. **Rotate it, if needed.** Drag the green dot at the top of the square to
    rotate the selection to any angle. The exported image is always a plain
    upright square — rotation just changes which ground it covers.

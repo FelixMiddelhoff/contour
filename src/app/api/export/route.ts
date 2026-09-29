@@ -3,7 +3,7 @@ import { buildElevationGrid } from "@/lib/elevation";
 import { encodeExport, buildSidecar, type ExportFormat, type Normalization } from "@/lib/export";
 import type { RotatedSquare } from "@/lib/geo";
 
-const MAX_AREA_KM2 = 50 * 50;
+const MAX_AREA_KM2 = 100 * 100;
 const VALID_FORMATS: ExportFormat[] = ["png16", "png8", "r16", "geotiff"];
 const VALID_RESOLUTIONS = [512, 1024, 2048, 4096];
 

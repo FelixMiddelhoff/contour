@@ -81,7 +81,7 @@ const BASEMAPS: Record<
   },
 };
 
-const MAX_AREA_KM2 = 50 * 50;
+const MAX_AREA_KM2 = 100 * 100;
 const RESOLUTIONS = [512, 1024, 2048, 4096] as const;
 const FORMATS = [
   { id: "png16", label: "16-bit PNG" },
@@ -411,7 +411,7 @@ export default function MapView() {
                 <p className="mb-2 font-semibold text-zinc-900 dark:text-zinc-100">How to use</p>
                 <ol className="list-decimal space-y-1.5 pl-4">
                   <li>Pick a basemap (top-left) to help find your region.</li>
-                  <li>Hold <strong>Shift</strong> and drag on the map to select a square (max 50 km).</li>
+                  <li>Hold <strong>Shift</strong> and drag on the map to select a square (max 100 km). Bigger regions lose detail per pixel at the same resolution.</li>
                   <li>Drag the green dot to rotate the selection, if needed.</li>
                   <li>Choose format, resolution, and normalization below.</li>
                   <li>Click <strong>Export</strong> to download.</li>
@@ -435,7 +435,7 @@ export default function MapView() {
               {Math.round(((square.rotationDeg % 360) + 360) % 360)}°
             </p>
             {!tooBig && (
-              <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
                 Elevation:{" "}
                 {statsLoading && !elevationStats
                   ? "…"
@@ -444,7 +444,14 @@ export default function MapView() {
                   : "—"}
               </p>
             )}
-            {tooBig && <div className="mb-3" />}
+            {!tooBig && square.sideKm > 30 && (
+              <p className="mb-3 text-xs text-amber-600 dark:text-amber-500">
+                Larger regions pack less detail per pixel than smaller ones
+                at the same resolution — pick a higher resolution or a
+                smaller area for sharper output.
+              </p>
+            )}
+            {(tooBig || square.sideKm <= 30) && <div className="mb-3" />}
           </>
         ) : (
           <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">No region selected</p>
