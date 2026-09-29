@@ -11,8 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "electron:dev": "next build && electron .",
-    "electron:build:win": "next build && electron-builder --win",
-    "electron:build:mac": "next build && electron-builder --mac"
+    "electron:build:win": "next build && electron-builder --win --publish=never",
+    "electron:build:mac": "next build && electron-builder --mac --publish=never"
   },
   "dependencies": {
     "maplibre-gl": "^4.7.1",
