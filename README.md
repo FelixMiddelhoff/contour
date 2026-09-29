@@ -19,7 +19,12 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
      (lower precision), RAW `.r16` (headerless 16-bit, for direct import
      into engines like Unreal/CryEngine/World Machine), or GeoTIFF (32-bit
      float, real elevation values in meters, georeferenced WGS84 — for GIS
-     tools like QGIS).
+     tools like QGIS/ArcGIS/gdal, not a regular image viewer). GeoTIFF
+     pixels hold raw elevation (e.g. `800.0`), not a normalized 0–1 range,
+     so opening it in Windows Photos, a browser, or any plain image viewer
+     will show solid white — those tools assume float pixels are already
+     in 0–1 and everything clips. Open it in a GIS tool instead, where you
+     set your own display stretch.
    - **Resolution** — output image size (512–4096 px square).
    - **Normalization** — *Best contrast* stretches the selection's own
      min/max elevation across the full black-white range (sharpest detail,
