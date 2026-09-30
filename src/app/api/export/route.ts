@@ -5,7 +5,7 @@ import type { RotatedSquare } from "@/lib/geo";
 
 const MAX_AREA_KM2 = 100 * 100;
 const VALID_FORMATS: ExportFormat[] = ["png16", "png8", "r16", "geotiff"];
-const VALID_RESOLUTIONS = [512, 1024, 2048, 4096];
+const VALID_RESOLUTIONS = [512, 1024, 2048, 4096, 8192, 16384];
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
