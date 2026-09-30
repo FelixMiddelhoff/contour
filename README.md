@@ -51,6 +51,12 @@ Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below
    - **Georeference sidecar** — optional `.json` with the exact bounding
      box, resolution, elevation min/max, and normalization used, for
      reimporting with real-world scale.
+   - **Tiling mode** — after an export, keeps a dashed "ghost" outline of
+     that square on the map, plus ←/↑/↓/→ buttons to place a new square of
+     the same size and rotation exactly touching one of its edges. Useful
+     for exporting a region larger than one tile allows and stitching the
+     pieces together in a photo editor — since placement is computed
+     mathematically rather than dragged by eye, tiles line up perfectly.
 5. Click **Export** to download the file.
 
 Elevation data comes from the Tilezen/AWS Terrarium tile dataset (free,
@@ -142,6 +148,9 @@ Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
 
 # Changelog
 
+- **v0.1.4** — Added tiling mode: keep a ghost outline of the last export
+  and place new squares exactly adjacent to it, for stitching multiple
+  exports into one larger heightmap.
 - **v0.1.3** — Added 8K resolution (web + desktop) and 16K (desktop only —
   times out as a serverless function on the web app). GeoTIFF disabled
   above 4K since it's uncompressed and gets huge (~1GB at 16K).
