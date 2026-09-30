@@ -132,6 +132,9 @@ export default function MapView() {
   const [elevationStats, setElevationStats] = useState<{ min: number; max: number } | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [tilingEnabled, setTilingEnabled] = useState(false);
+  const [showTilingInfo, setShowTilingInfo] = useState(false);
+  const [ghostSquare, setGhostSquare] = useState<RotatedSquare | null>(null);
 
   const tooBig = square !== null && square.sideKm * square.sideKm > MAX_AREA_KM2;
 
@@ -201,6 +204,31 @@ export default function MapView() {
     [renderSelection]
   );
 
+  const placeAdjacent = useCallback(
+    (direction: "up" | "down" | "left" | "right") => {
+      const map = mapRef.current;
+      if (!map || !ghostSquare) return;
+      const offsets: Record<typeof direction, [number, number]> = {
+        right: [ghostSquare.sideKm, 0],
+        left: [-ghostSquare.sideKm, 0],
+        up: [0, ghostSquare.sideKm],
+        down: [0, -ghostSquare.sideKm],
+      };
+      const [u, v] = offsets[direction];
+      const { lng, lat } = localToLngLat(ghostSquare, u, v);
+      const next: RotatedSquare = {
+        centerLng: lng,
+        centerLat: lat,
+        sideKm: ghostSquare.sideKm,
+        rotationDeg: ghostSquare.rotationDeg,
+      };
+      setSquare(next);
+      renderSelection(map, next);
+      map.easeTo({ center: [lng, lat], duration: 300 });
+    },
+    [ghostSquare, renderSelection]
+  );
+
   useEffect(() => {
     if (!mapDiv.current || mapRef.current) return;
     const map = new maplibregl.Map({
@@ -212,6 +240,23 @@ export default function MapView() {
     mapRef.current = map;
 
     map.on("load", () => {
+      map.addSource("ghost", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "ghost-fill",
+        type: "fill",
+        source: "ghost",
+        paint: { "fill-color": "#3b82f6", "fill-opacity": 0.08 },
+      });
+      map.addLayer({
+        id: "ghost-line",
+        type: "line",
+        source: "ghost",
+        paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [2, 2] },
+      });
+
       map.addSource("selection", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -269,6 +314,27 @@ export default function MapView() {
     }
     map.setStyle(styleFor(basemap));
     map.once("styledata", () => {
+      if (!map.getSource("ghost")) {
+        map.addSource("ghost", {
+          type: "geojson",
+          data:
+            ghostSquare && tilingEnabled
+              ? squareToGeoJSON(ghostSquare)
+              : { type: "FeatureCollection", features: [] },
+        });
+        map.addLayer({
+          id: "ghost-fill",
+          type: "fill",
+          source: "ghost",
+          paint: { "fill-color": "#3b82f6", "fill-opacity": 0.08 },
+        });
+        map.addLayer({
+          id: "ghost-line",
+          type: "line",
+          source: "ghost",
+          paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [2, 2] },
+        });
+      }
       if (!map.getSource("selection")) {
         map.addSource("selection", {
           type: "geojson",
@@ -291,6 +357,16 @@ export default function MapView() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const src = map.getSource("ghost") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(
+      ghostSquare && tilingEnabled ? squareToGeoJSON(ghostSquare) : { type: "FeatureCollection", features: [] }
+    );
+  }, [ghostSquare, tilingEnabled]);
 
   useEffect(() => {
     // stale elevationStats from a previous selection is harmless here — the
@@ -358,6 +434,8 @@ export default function MapView() {
       } else {
         download(await res.blob(), `heightmap.${ext}`);
       }
+
+      if (tilingEnabled) setGhostSquare(square);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
@@ -518,10 +596,59 @@ export default function MapView() {
           <option value="fixed">Fixed scale (0–9000m)</option>
         </select>
 
-        <label className="mb-4 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+        <label className="mb-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
           <input type="checkbox" checked={sidecar} onChange={(e) => setSidecar(e.target.checked)} />
           Include georeference sidecar (.json)
         </label>
+
+        <div className="mb-1 flex items-center gap-1.5">
+          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              checked={tilingEnabled}
+              onChange={(e) => {
+                setTilingEnabled(e.target.checked);
+                if (!e.target.checked) setGhostSquare(null);
+              }}
+            />
+            Tiling mode
+          </label>
+          <div className="relative">
+            <button
+              onClick={() => setShowTilingInfo((v) => !v)}
+              aria-label="What is tiling mode?"
+              className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-300 text-[10px] font-semibold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              ?
+            </button>
+            {showTilingInfo && (
+              <div className="absolute right-0 top-full z-10 mt-2 w-64 rounded-lg bg-white p-3 text-xs leading-relaxed text-zinc-700 shadow-xl dark:bg-zinc-900 dark:text-zinc-300">
+                After each export, keeps a dashed outline (the &quot;ghost&quot;)
+                of that square on the map, plus buttons to place a new
+                identical square exactly touching one of its edges — useful
+                for exporting several tiles and stitching them into one
+                larger heightmap in a photo editor.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {tilingEnabled && ghostSquare && (
+          <div className="mb-3 flex items-center justify-center gap-1">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">Place adjacent:</span>
+            {(["left", "up", "down", "right"] as const).map((dir) => (
+              <button
+                key={dir}
+                onClick={() => placeAdjacent(dir)}
+                aria-label={`Place adjacent square (${dir})`}
+                className="flex h-6 w-6 items-center justify-center rounded-md border border-zinc-300 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                {dir === "left" ? "←" : dir === "up" ? "↑" : dir === "down" ? "↓" : "→"}
+              </button>
+            ))}
+          </div>
+        )}
+        {!(tilingEnabled && ghostSquare) && <div className="mb-3" />}
 
         <div
           className="relative"
