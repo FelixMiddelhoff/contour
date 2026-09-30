@@ -4,8 +4,13 @@ import { encodeExport, buildSidecar, type ExportFormat, type Normalization } fro
 import type { RotatedSquare } from "@/lib/geo";
 
 const MAX_AREA_KM2 = 100 * 100;
+const IS_DESKTOP = process.env.NEXT_PUBLIC_IS_DESKTOP === "1";
 const VALID_FORMATS: ExportFormat[] = ["png16", "png8", "r16", "geotiff"];
-const VALID_RESOLUTIONS = [512, 1024, 2048, 4096, 8192, 16384];
+// 16K's resampling cost times out on the web app's serverless function —
+// only safe with no execution-time limit, i.e. the desktop app
+const VALID_RESOLUTIONS = IS_DESKTOP
+  ? [512, 1024, 2048, 4096, 8192, 16384]
+  : [512, 1024, 2048, 4096, 8192];
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -29,6 +34,12 @@ export async function POST(req: NextRequest) {
   }
   if (!resolution || !VALID_RESOLUTIONS.includes(resolution)) {
     return NextResponse.json({ error: "Invalid resolution" }, { status: 400 });
+  }
+  if (format === "geotiff" && resolution > 4096) {
+    return NextResponse.json(
+      { error: "GeoTIFF is disabled above 4K — uncompressed 32-bit float would be too large" },
+      { status: 400 }
+    );
   }
   if (square.sideKm * square.sideKm > MAX_AREA_KM2) {
     return NextResponse.json(

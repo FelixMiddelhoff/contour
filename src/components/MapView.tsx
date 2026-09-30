@@ -82,7 +82,11 @@ const BASEMAPS: Record<
 };
 
 const MAX_AREA_KM2 = 100 * 100;
-const RESOLUTIONS = [512, 1024, 2048, 4096] as const;
+const IS_DESKTOP = process.env.NEXT_PUBLIC_IS_DESKTOP === "1";
+// 16K's pixel-resampling cost times out on the web app's serverless function —
+// only safe with no execution-time limit, i.e. the desktop app
+const ALL_RESOLUTIONS = [512, 1024, 2048, 4096, 8192, 16384] as const;
+const RESOLUTIONS = IS_DESKTOP ? ALL_RESOLUTIONS : ALL_RESOLUTIONS.filter((r) => r <= 8192);
 const FORMATS = [
   { id: "png16", label: "16-bit PNG" },
   { id: "png8", label: "8-bit PNG" },
@@ -463,25 +467,46 @@ export default function MapView() {
           onChange={(e) => setFormat(e.target.value as typeof format)}
           className="mb-3 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
-          {FORMATS.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.label}
-            </option>
-          ))}
+          {FORMATS.map((f) => {
+            const disabled = f.id === "geotiff" && resolution > 4096;
+            return (
+              <option key={f.id} value={f.id} disabled={disabled}>
+                {f.label}
+                {disabled ? " — disabled above 4K (uncompressed, too large)" : ""}
+              </option>
+            );
+          })}
         </select>
 
         <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Resolution</label>
         <select
           value={resolution}
-          onChange={(e) => setResolution(Number(e.target.value) as typeof resolution)}
-          className="mb-3 w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          onChange={(e) => {
+            const next = Number(e.target.value) as typeof resolution;
+            setResolution(next);
+            if (next > 4096 && format === "geotiff") setFormat("png16");
+          }}
+          className="w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         >
           {RESOLUTIONS.map((r) => (
             <option key={r} value={r}>
               {r} × {r}
+              {r === 8192 ? " (8K)" : r === 16384 ? " (16K)" : ""}
             </option>
           ))}
         </select>
+
+        {resolution > 4096 && (
+          <p className="mb-3 mt-1 text-xs text-amber-600 dark:text-amber-500">
+            Resolutions above 4K produce very large files. RAW .r16 isn&apos;t
+            compressed (~{resolution === 16384 ? "512 MB" : "128 MB"}); PNG
+            compresses better but can still be 100MB+. GeoTIFF is disabled at
+            this size — uncompressed 32-bit float would be roughly{" "}
+            {resolution === 16384 ? "1 GB" : "256 MB"}. Export may take a
+            while.
+          </p>
+        )}
+        {!(resolution > 4096) && <div className="mb-3" />}
 
         <label className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Normalization</label>
         <select

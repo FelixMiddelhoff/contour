@@ -10,9 +10,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "electron:dev": "next build && electron .",
-    "electron:build:win": "next build --webpack && electron-builder --win --publish=never",
-    "electron:build:mac": "next build --webpack && electron-builder --mac --publish=never"
+    "electron:dev": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build && electron .",
+    "electron:build:win": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --win --publish=never",
+    "electron:build:mac": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --mac --publish=never"
   },
   "dependencies": {
     "maplibre-gl": "^4.7.1",
@@ -26,6 +26,7 @@
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "eslint": "^9",
