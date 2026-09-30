@@ -36,7 +36,12 @@ Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below
      in 0–1 and everything clips. Open it in a GIS tool instead, where you
      set your own display stretch. Rotated selections are georeferenced
      correctly via a full affine transform.
-   - **Resolution** — output image size (512–4096 px square).
+   - **Resolution** — output image size, 512 up to 8192 (8K) on the web
+     app, or up to 16384 (16K) in the desktop app. 16K needs enough
+     compute time that it only works reliably outside a serverless
+     function, so it's desktop-only. Above 4K, GeoTIFF is disabled
+     (uncompressed 32-bit float gets too large — ~256MB at 8K, ~1GB at
+     16K); use PNG or RAW `.r16` instead at those sizes.
    - **Normalization** — *Best contrast* stretches the selection's own
      min/max elevation across the full black-white range (sharpest detail,
      but flat/coastal regions can look noisy since there's little real
@@ -137,6 +142,9 @@ Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
 
 # Changelog
 
+- **v0.1.3** — Added 8K resolution (web + desktop) and 16K (desktop only —
+  times out as a serverless function on the web app). GeoTIFF disabled
+  above 4K since it's uncompressed and gets huge (~1GB at 16K).
 - **v0.1.2** — Fixed occasional "fetch failed" export errors: tile fetches
   now retry automatically on transient network blips, and any error that
   still surfaces shows a clearer "try again" message instead of a raw
