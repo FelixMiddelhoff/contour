@@ -160,6 +160,9 @@ Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
 
 # Changelog
 
+- **v0.1.6** — Export now shows a real live progress bar (tiles fetched,
+  resampling, encoding) instead of just a spinner — driven by actual
+  server-side progress, not an estimate.
 - **v0.1.5** — Added Linux desktop support (AppImage + Flatpak), thanks to
   [@ThomasMeisters](https://github.com/ThomasMeisters).
 - **v0.1.4** — Added tiling mode: keep a ghost outline of the last export
