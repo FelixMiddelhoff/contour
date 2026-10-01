@@ -24,12 +24,19 @@ interface StitchedGrid {
   originY: number;
 }
 
+export type ExportProgress =
+  | { stage: "tiles"; current: number; total: number }
+  | { stage: "resample"; current: number; total: number };
+
 async function fetchAndStitch(
   bbox: [number, number, number, number],
-  zoom: number
+  zoom: number,
+  onProgress?: (p: ExportProgress) => void
 ): Promise<StitchedGrid> {
   const range = getTileRange(bbox, zoom);
-  const tiles = await fetchTiles(range);
+  const tiles = await fetchTiles(range, (done, total) =>
+    onProgress?.({ stage: "tiles", current: done, total })
+  );
 
   const cols = range.maxX - range.minX + 1;
   const rows = range.maxY - range.minY + 1;
@@ -88,20 +95,27 @@ function sampleBilinear(grid: StitchedGrid, lng: number, lat: number): number {
  */
 export async function buildElevationGrid(
   square: RotatedSquare,
-  outputResolution: number
+  outputResolution: number,
+  onProgress?: (p: ExportProgress) => void
 ): Promise<ElevationGrid> {
   // small margin so bilinear sampling near the rotated square's edges never
   // reads outside the fetched/stitched tile area
   const bbox = boundingBoxOf(square, square.sideKm * 0.05);
   const zoom = pickZoom(bbox, outputResolution);
-  const stitched = await fetchAndStitch(bbox, zoom);
+  const stitched = await fetchAndStitch(bbox, zoom, onProgress);
 
   const out = new Float32Array(outputResolution * outputResolution);
   let min = Infinity;
   let max = -Infinity;
   const half = square.sideKm / 2;
+  // report ~100 times total regardless of resolution — enough for a smooth
+  // bar without spamming thousands of events at 16K
+  const progressEvery = Math.max(1, Math.floor(outputResolution / 100));
 
   for (let oy = 0; oy < outputResolution; oy++) {
+    if (onProgress && oy % progressEvery === 0) {
+      onProgress({ stage: "resample", current: oy, total: outputResolution });
+    }
     // oy=0 is the top of the image = north edge of the square (before rotation)
     const v = half - (oy / (outputResolution - 1)) * square.sideKm;
     for (let ox = 0; ox < outputResolution; ox++) {
@@ -116,6 +130,7 @@ export async function buildElevationGrid(
       if (clamped > max) max = clamped;
     }
   }
+  onProgress?.({ stage: "resample", current: outputResolution, total: outputResolution });
 
   return { width: outputResolution, height: outputResolution, data: out, min, max };
 }

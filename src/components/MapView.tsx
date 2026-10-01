@@ -127,6 +127,11 @@ export default function MapView() {
   const [normalization, setNormalization] = useState<"selection" | "fixed">("selection");
   const [sidecar, setSidecar] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{
+    stage: "tiles" | "resample" | "encoding";
+    current: number;
+    total: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showExportTooltip, setShowExportTooltip] = useState(false);
   const [elevationStats, setElevationStats] = useState<{ min: number; max: number } | null>(null);
@@ -400,6 +405,7 @@ export default function MapView() {
     if (!square) return;
     setExporting(true);
     setError(null);
+    setExportProgress(null);
     try {
       const res = await fetch("/api/export", {
         method: "POST",
@@ -410,10 +416,53 @@ export default function MapView() {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.error ?? `Export failed (${res.status})`);
       }
+      if (!res.body) throw new Error("Export failed — no response body");
+
+      const reader = res.body.getReader();
+      let headerDone = false;
+      let pending = new Uint8Array(0);
+      const binaryChunks: Uint8Array[] = [];
+      let result: { contentType: string; sidecar: Record<string, unknown> | null } | null = null;
+
+      const concat = (a: Uint8Array, b: Uint8Array) => {
+        const out = new Uint8Array(a.length + b.length);
+        out.set(a, 0);
+        out.set(b, a.length);
+        return out;
+      };
+
+      while (!headerDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending = concat(pending, value);
+
+        let newlineIdx: number;
+        while (!headerDone && (newlineIdx = pending.indexOf(10)) !== -1) {
+          const lineBytes = pending.slice(0, newlineIdx);
+          pending = pending.slice(newlineIdx + 1);
+          const line = JSON.parse(new TextDecoder().decode(lineBytes));
+
+          if (line.type === "progress") {
+            setExportProgress({ stage: line.stage, current: line.current, total: line.total });
+          } else if (line.type === "error") {
+            throw new Error(line.message);
+          } else if (line.type === "result") {
+            result = { contentType: line.contentType, sidecar: line.sidecar };
+            headerDone = true;
+            if (pending.length > 0) binaryChunks.push(pending);
+          }
+        }
+      }
+      if (!result) throw new Error("Export failed — stream ended unexpectedly");
+
+      // drain the rest of the stream as raw binary (the file itself)
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        binaryChunks.push(value);
+      }
 
       const ext = format === "geotiff" ? "tif" : format === "r16" ? "r16" : "png";
-      const contentType = res.headers.get("Content-Type") ?? "";
-
       const download = (blob: Blob, name: string) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -423,16 +472,12 @@ export default function MapView() {
         URL.revokeObjectURL(url);
       };
 
-      if (contentType.includes("application/json")) {
-        const { image, contentType: imgType, sidecar: sidecarData } = await res.json();
-        const imgBytes = Uint8Array.from(atob(image), (c) => c.charCodeAt(0));
-        download(new Blob([imgBytes], { type: imgType }), `heightmap.${ext}`);
+      download(new Blob(binaryChunks as BlobPart[], { type: result.contentType }), `heightmap.${ext}`);
+      if (result.sidecar) {
         download(
-          new Blob([JSON.stringify(sidecarData, null, 2)], { type: "application/json" }),
+          new Blob([JSON.stringify(result.sidecar, null, 2)], { type: "application/json" }),
           "heightmap.json"
         );
-      } else {
-        download(await res.blob(), `heightmap.${ext}`);
       }
 
       if (tilingEnabled) setGhostSquare(square);
@@ -440,6 +485,7 @@ export default function MapView() {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
       setExporting(false);
+      setExportProgress(null);
     }
   }
 
@@ -669,6 +715,36 @@ export default function MapView() {
             </div>
           )}
         </div>
+
+        {exporting && exportProgress && (
+          <div className="mt-2">
+            <div className="mb-1 flex justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+              <span>
+                {exportProgress.stage === "tiles"
+                  ? "Fetching elevation tiles"
+                  : exportProgress.stage === "resample"
+                  ? "Resampling"
+                  : "Encoding"}
+              </span>
+              <span>
+                {exportProgress.stage === "encoding"
+                  ? ""
+                  : `${exportProgress.current}/${exportProgress.total}`}
+              </span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+              <div
+                className="h-full rounded-full bg-zinc-900 transition-all duration-150 dark:bg-white"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    (exportProgress.current / Math.max(1, exportProgress.total)) * 100
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       </div>

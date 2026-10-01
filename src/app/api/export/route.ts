@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildElevationGrid } from "@/lib/elevation";
+import { buildElevationGrid, type ExportProgress } from "@/lib/elevation";
 import { encodeExport, buildSidecar, type ExportFormat, type Normalization } from "@/lib/export";
 import type { RotatedSquare } from "@/lib/geo";
 
@@ -48,28 +48,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  try {
-    const grid = await buildElevationGrid(square, resolution);
-    const { buffer, contentType } = await encodeExport(grid, format, normalization, square);
+  const encoder = new TextEncoder();
 
-    if (!sidecar) {
-      return new NextResponse(new Uint8Array(buffer), {
-        headers: { "Content-Type": contentType, "Content-Disposition": "attachment" },
-      });
-    }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const sendLine = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
 
-    // with sidecar requested, return a small JSON envelope the client can use
-    // to trigger two downloads (kept simple: base64 the image + sidecar JSON)
-    const meta = buildSidecar(square, grid, format, normalization);
-    return NextResponse.json({
-      image: Buffer.from(buffer).toString("base64"),
-      contentType,
-      sidecar: meta,
-    });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ error: friendlyErrorMessage(err) }, { status: 500 });
-  }
+      try {
+        const onProgress = (p: ExportProgress) => sendLine({ type: "progress", ...p });
+
+        const grid = await buildElevationGrid(square, resolution, onProgress);
+        sendLine({ type: "progress", stage: "encoding", current: 0, total: 1 });
+        const { buffer, contentType } = await encodeExport(grid, format, normalization, square);
+
+        const meta = sidecar ? buildSidecar(square, grid, format, normalization) : null;
+        sendLine({ type: "result", contentType, sidecar: meta });
+        controller.enqueue(new Uint8Array(buffer));
+        controller.close();
+      } catch (err) {
+        console.error(err);
+        sendLine({ type: "error", message: friendlyErrorMessage(err) });
+        controller.close();
+      }
+    },
+  });
+
+  return new NextResponse(stream, { headers: { "Content-Type": "application/octet-stream" } });
 }
 
 function friendlyErrorMessage(err: unknown): string {

@@ -86,11 +86,22 @@ async function fetchTileWithRetry(zoom: number, x: number, y: number): Promise<F
     : new Error(`Tile fetch failed for ${zoom}/${x}/${y}`);
 }
 
-export async function fetchTiles(range: TileRange): Promise<FetchedTile[]> {
+export async function fetchTiles(
+  range: TileRange,
+  onTileFetched?: (done: number, total: number) => void
+): Promise<FetchedTile[]> {
   const jobs: Promise<FetchedTile>[] = [];
+  let done = 0;
+  const total = (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
   for (let x = range.minX; x <= range.maxX; x++) {
     for (let y = range.minY; y <= range.maxY; y++) {
-      jobs.push(fetchTileWithRetry(range.zoom, x, y));
+      jobs.push(
+        fetchTileWithRetry(range.zoom, x, y).then((tile) => {
+          done++;
+          onTileFetched?.(done, total);
+          return tile;
+        })
+      );
     }
   }
   return Promise.all(jobs);
