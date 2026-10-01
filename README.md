@@ -6,7 +6,7 @@ into game engines and terrain tools (Unreal, Unity, World Machine, etc.).
 
 **Live:** https://contour-swart.vercel.app
 
-**Download the desktop app** (no browser needed): see the [latest release](https://github.com/FelixMiddelhoff/contour/releases/latest) for Windows (.exe) and macOS Apple Silicon (.dmg) installers — see [Desktop app](#desktop-app) below for setup notes.
+**Download the desktop app** (no browser needed): see the [latest release](https://github.com/FelixMiddelhoff/contour/releases/latest) for Windows (.exe), macOS Apple Silicon (.dmg) and Linux x64 (.flatpak, .AppImage) installers — see [Desktop app](#desktop-app) below for setup notes.
 
 Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below.
 
@@ -122,8 +122,20 @@ map tiles and elevation data.
   Gatekeeper blocks the first launch — right-click the app → **Open** to
   bypass it, or allow it under System Settings → Privacy & Security.
   Apple Silicon (arm64) only for now.
+- **Linux** (x64): two options, same app.
+  - **Flatpak**: `flatpak install --user contour-*.flatpak`, then start it
+    from your app menu or with `flatpak run com.contour.heightmap`. The first
+    install pulls the Freedesktop runtime from Flathub, so Flathub needs to be
+    set up as a remote ([setup guide](https://flathub.org/setup)).
+  - **AppImage**: make it executable (`chmod +x contour-*.AppImage`) and run
+    it. Needs FUSE 2, which some newer distros no longer ship by default
+    (`libfuse2t64` on Ubuntu 24.04, `fuse-libs` on Fedora).
 
-Both are built automatically by `.github/workflows/build-desktop.yml` on
+  Build it yourself with `npm run electron:build:linux` (produces both files
+  in `dist/`; the Flatpak needs `flatpak-builder` and the Flathub remote
+  added with `--user`).
+
+All three are built automatically by `.github/workflows/build-desktop.yml` on
 GitHub Actions (manually via "Run workflow", or by pushing a `v*` tag) —
 download the artifacts from the workflow run.
 

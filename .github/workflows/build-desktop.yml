@@ -20,6 +20,11 @@ jobs:
           - os: macos-latest
             script: electron:build:mac
             artifact: dist/*.dmg
+          - os: ubuntu-latest
+            script: electron:build:linux
+            artifact: |
+              dist/*.AppImage
+              dist/*.flatpak
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +34,16 @@ jobs:
           node-version: 22
 
       - run: npm install
+
+      # electron-builder's flatpak target installs the runtime, SDK and
+      # Electron base app itself, but needs flatpak-builder and a user-level
+      # Flathub remote to pull them from
+      - name: Install flatpak tooling
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
       - run: npm run ${{ matrix.script }}
 
