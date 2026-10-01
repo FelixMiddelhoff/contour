@@ -752,7 +752,7 @@ export default function MapView() {
                   <img
                     src={previewImage}
                     alt="Elevation preview"
-                    className="h-10 w-10 shrink-0 rounded border border-zinc-300 object-cover dark:border-zinc-600"
+                    className="h-16 w-16 shrink-0 rounded border border-zinc-300 object-cover dark:border-zinc-600"
                   />
                 )}
               </div>
