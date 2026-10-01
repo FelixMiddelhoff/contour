@@ -160,6 +160,8 @@ Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
 
 # Changelog
 
+- **v0.1.5** — Added Linux desktop support (AppImage + Flatpak), thanks to
+  [@ThomasMeisters](https://github.com/ThomasMeisters).
 - **v0.1.4** — Added tiling mode: keep a ghost outline of the last export
   and place new squares exactly adjacent to it, for stitching multiple
   exports into one larger heightmap.
