@@ -731,32 +731,34 @@ export default function MapView() {
 
         {square ? (
           <>
-            <p className={`text-xs ${tooBig ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"}`}>
-              {square.sideKm.toFixed(1)} km × {square.sideKm.toFixed(1)} km
-              {tooBig && ` — exceeds ${Math.round(Math.sqrt(MAX_AREA_KM2))}km max`}
-              {" · "}
-              {Math.round(((square.rotationDeg % 360) + 360) % 360)}°
-            </p>
-            {!tooBig && (
-              <div className="flex items-center gap-2">
-                <p className="flex-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Elevation:{" "}
-                  {statsLoading && !elevationStats
-                    ? "…"
-                    : elevationStats
-                    ? `${Math.round(elevationStats.min)}–${Math.round(elevationStats.max)} m`
-                    : "—"}
+            <div className="flex items-start gap-2">
+              <div className="flex-1">
+                <p className={`text-xs ${tooBig ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  {square.sideKm.toFixed(1)} km × {square.sideKm.toFixed(1)} km
+                  {tooBig && ` — exceeds ${Math.round(Math.sqrt(MAX_AREA_KM2))}km max`}
+                  {" · "}
+                  {Math.round(((square.rotationDeg % 360) + 360) % 360)}°
                 </p>
-                {previewImage && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={previewImage}
-                    alt="Elevation preview"
-                    className="h-16 w-16 shrink-0 rounded border border-zinc-300 object-cover dark:border-zinc-600"
-                  />
+                {!tooBig && (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Elevation:{" "}
+                    {statsLoading && !elevationStats
+                      ? "…"
+                      : elevationStats
+                      ? `${Math.round(elevationStats.min)}–${Math.round(elevationStats.max)} m`
+                      : "—"}
+                  </p>
                 )}
               </div>
-            )}
+              {!tooBig && previewImage && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewImage}
+                  alt="Elevation preview"
+                  className="h-16 w-16 shrink-0 rounded border border-zinc-300 object-cover dark:border-zinc-600"
+                />
+              )}
+            </div>
             {!tooBig && square.sideKm > 30 && (
               <p className="mb-3 text-xs text-amber-600 dark:text-amber-500">
                 Larger regions pack less detail per pixel than smaller ones
