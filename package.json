@@ -17,6 +17,7 @@
     "electron:build:linux": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --linux --publish=never"
   },
   "dependencies": {
+    "jszip": "^3.10.2",
     "maplibre-gl": "^4.7.1",
     "next": "16.3.6",
     "react": "^19.3.0",

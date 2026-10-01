@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import JSZip from "jszip";
 import { squareCorners, localToLngLat, kmPerDegLng, KM_PER_DEG_LAT, type RotatedSquare } from "@/lib/geo";
 
 type BasemapId = "osm" | "topo" | "satellite" | "satellite-hillshade";
@@ -103,6 +104,94 @@ function styleFor(id: BasemapId): maplibregl.StyleSpecification {
   } as maplibregl.StyleSpecification;
 }
 
+interface ExportRequestOptions {
+  square: RotatedSquare;
+  format: (typeof FORMATS)[number]["id"];
+  resolution: number;
+  normalization: "selection" | "fixed";
+  sidecar: boolean;
+  onProgress?: (p: { stage: "tiles" | "resample" | "encoding"; current: number; total: number }) => void;
+}
+
+async function runExportRequest({
+  square,
+  format,
+  resolution,
+  normalization,
+  sidecar,
+  onProgress,
+}: ExportRequestOptions): Promise<{ blob: Blob; contentType: string; sidecar: Record<string, unknown> | null }> {
+  const res = await fetch("/api/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ square, format, resolution, normalization, sidecar }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error ?? `Export failed (${res.status})`);
+  }
+  if (!res.body) throw new Error("Export failed — no response body");
+
+  const reader = res.body.getReader();
+  let headerDone = false;
+  let pending = new Uint8Array(0);
+  const binaryChunks: Uint8Array[] = [];
+  let result: { contentType: string; sidecar: Record<string, unknown> | null } | null = null;
+
+  const concat = (a: Uint8Array, b: Uint8Array) => {
+    const out = new Uint8Array(a.length + b.length);
+    out.set(a, 0);
+    out.set(b, a.length);
+    return out;
+  };
+
+  while (!headerDone) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    pending = concat(pending, value);
+
+    let newlineIdx: number;
+    while (!headerDone && (newlineIdx = pending.indexOf(10)) !== -1) {
+      const lineBytes = pending.slice(0, newlineIdx);
+      pending = pending.slice(newlineIdx + 1);
+      const line = JSON.parse(new TextDecoder().decode(lineBytes));
+
+      if (line.type === "progress") {
+        onProgress?.({ stage: line.stage, current: line.current, total: line.total });
+      } else if (line.type === "error") {
+        throw new Error(line.message);
+      } else if (line.type === "result") {
+        result = { contentType: line.contentType, sidecar: line.sidecar };
+        headerDone = true;
+        if (pending.length > 0) binaryChunks.push(pending);
+      }
+    }
+  }
+  if (!result) throw new Error("Export failed — stream ended unexpectedly");
+
+  // drain the rest of the stream as raw binary (the file itself)
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    binaryChunks.push(value);
+  }
+
+  return {
+    blob: new Blob(binaryChunks as BlobPart[], { type: result.contentType }),
+    contentType: result.contentType,
+    sidecar: result.sidecar,
+  };
+}
+
+function triggerDownload(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function squareToGeoJSON(square: RotatedSquare): GeoJSON.Feature<GeoJSON.Polygon> {
   const corners = squareCorners(square).map((c) => [c.lng, c.lat] as [number, number]);
   return {
@@ -119,6 +208,7 @@ export default function MapView() {
   const drawingRef = useRef(false);
   const startLngLatRef = useRef<{ lng: number; lat: number } | null>(null);
   const isFirstBasemapRender = useRef(true);
+  const skipNextSearchRef = useRef(false);
 
   const [basemap, setBasemap] = useState<BasemapId>("osm");
   const [square, setSquare] = useState<RotatedSquare | null>(null);
@@ -135,11 +225,24 @@ export default function MapView() {
   const [error, setError] = useState<string | null>(null);
   const [showExportTooltip, setShowExportTooltip] = useState(false);
   const [elevationStats, setElevationStats] = useState<{ min: number; max: number } | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [tilingEnabled, setTilingEnabled] = useState(false);
   const [showTilingInfo, setShowTilingInfo] = useState(false);
   const [ghostSquare, setGhostSquare] = useState<RotatedSquare | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<
+    { label: string; lng: number; lat: number }[]
+  >([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [gridRows, setGridRows] = useState(2);
+  const [gridCols, setGridCols] = useState(2);
+  const [batchGridEnabled, setBatchGridEnabled] = useState(false);
+  const [showBatchGridInfo, setShowBatchGridInfo] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   const tooBig = square !== null && square.sideKm * square.sideKm > MAX_AREA_KM2;
 
@@ -308,7 +411,7 @@ export default function MapView() {
       map.remove();
       mapRef.current = null;
     };
-  }, [drawSquare]);
+  }, [drawSquare, renderSelection]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -388,9 +491,15 @@ export default function MapView() {
         });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (!cancelled) setElevationStats({ min: data.min, max: data.max });
+        if (!cancelled) {
+          setElevationStats({ min: data.min, max: data.max });
+          setPreviewImage(data.preview ?? null);
+        }
       } catch {
-        if (!cancelled) setElevationStats(null);
+        if (!cancelled) {
+          setElevationStats(null);
+          setPreviewImage(null);
+        }
       } finally {
         if (!cancelled) setStatsLoading(false);
       }
@@ -401,81 +510,69 @@ export default function MapView() {
     };
   }, [square, tooBig]);
 
+  useEffect(() => {
+    if (skipNextSearchRef.current) {
+      skipNextSearchRef.current = false;
+      return;
+    }
+    const query = searchQuery.trim();
+    // dropdown is already gated on searchResults.length > 0, so a short query
+    // just needs to skip fetching — the JSX guard handles not showing stale results
+    if (query.length < 3) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(query)}`
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { display_name: string; lon: string; lat: string }[];
+        if (!cancelled) {
+          setSearchResults(
+            data.map((d) => ({ label: d.display_name, lng: parseFloat(d.lon), lat: parseFloat(d.lat) }))
+          );
+          setShowSearchResults(true);
+        }
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  function flyToSearchResult(result: { label: string; lng: number; lat: number }) {
+    mapRef.current?.flyTo({ center: [result.lng, result.lat], zoom: 12 });
+    skipNextSearchRef.current = true;
+    setSearchQuery(result.label);
+    setShowSearchResults(false);
+  }
+
   async function handleExport() {
     if (!square) return;
     setExporting(true);
     setError(null);
     setExportProgress(null);
     try {
-      const res = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ square, format, resolution, normalization, sidecar }),
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error ?? `Export failed (${res.status})`);
-      }
-      if (!res.body) throw new Error("Export failed — no response body");
-
-      const reader = res.body.getReader();
-      let headerDone = false;
-      let pending = new Uint8Array(0);
-      const binaryChunks: Uint8Array[] = [];
-      let result: { contentType: string; sidecar: Record<string, unknown> | null } | null = null;
-
-      const concat = (a: Uint8Array, b: Uint8Array) => {
-        const out = new Uint8Array(a.length + b.length);
-        out.set(a, 0);
-        out.set(b, a.length);
-        return out;
-      };
-
-      while (!headerDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending = concat(pending, value);
-
-        let newlineIdx: number;
-        while (!headerDone && (newlineIdx = pending.indexOf(10)) !== -1) {
-          const lineBytes = pending.slice(0, newlineIdx);
-          pending = pending.slice(newlineIdx + 1);
-          const line = JSON.parse(new TextDecoder().decode(lineBytes));
-
-          if (line.type === "progress") {
-            setExportProgress({ stage: line.stage, current: line.current, total: line.total });
-          } else if (line.type === "error") {
-            throw new Error(line.message);
-          } else if (line.type === "result") {
-            result = { contentType: line.contentType, sidecar: line.sidecar };
-            headerDone = true;
-            if (pending.length > 0) binaryChunks.push(pending);
-          }
-        }
-      }
-      if (!result) throw new Error("Export failed — stream ended unexpectedly");
-
-      // drain the rest of the stream as raw binary (the file itself)
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        binaryChunks.push(value);
-      }
-
       const ext = format === "geotiff" ? "tif" : format === "r16" ? "r16" : "png";
-      const download = (blob: Blob, name: string) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = name;
-        a.click();
-        URL.revokeObjectURL(url);
-      };
+      const { blob, sidecar: sidecarData } = await runExportRequest({
+        square,
+        format,
+        resolution,
+        normalization,
+        sidecar,
+        onProgress: setExportProgress,
+      });
 
-      download(new Blob(binaryChunks as BlobPart[], { type: result.contentType }), `heightmap.${ext}`);
-      if (result.sidecar) {
-        download(
-          new Blob([JSON.stringify(result.sidecar, null, 2)], { type: "application/json" }),
+      triggerDownload(blob, `heightmap.${ext}`);
+      if (sidecarData) {
+        triggerDownload(
+          new Blob([JSON.stringify(sidecarData, null, 2)], { type: "application/json" }),
           "heightmap.json"
         );
       }
@@ -485,6 +582,53 @@ export default function MapView() {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
       setExporting(false);
+      setExportProgress(null);
+    }
+  }
+
+  async function handleBatchExport() {
+    if (!square) return;
+    setBatchExporting(true);
+    setError(null);
+    setBatchProgress({ current: 0, total: gridRows * gridCols });
+    try {
+      const zip = new JSZip();
+      const ext = format === "geotiff" ? "tif" : format === "r16" ? "r16" : "png";
+      let done = 0;
+
+      for (let r = 0; r < gridRows; r++) {
+        for (let c = 0; c < gridCols; c++) {
+          const { lng, lat } = localToLngLat(square, c * square.sideKm, -r * square.sideKm);
+          const cellSquare: RotatedSquare = {
+            centerLng: lng,
+            centerLat: lat,
+            sideKm: square.sideKm,
+            rotationDeg: square.rotationDeg,
+          };
+          const name = `heightmap_r${r}_c${c}`;
+          const { blob, sidecar: sidecarData } = await runExportRequest({
+            square: cellSquare,
+            format,
+            resolution,
+            normalization,
+            sidecar,
+            onProgress: setExportProgress,
+          });
+          zip.file(`${name}.${ext}`, blob);
+          if (sidecarData) zip.file(`${name}.json`, JSON.stringify(sidecarData, null, 2));
+
+          done++;
+          setBatchProgress({ current: done, total: gridRows * gridCols });
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      triggerDownload(zipBlob, `heightmap_grid_${gridRows}x${gridCols}.zip`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Batch export failed");
+    } finally {
+      setBatchExporting(false);
+      setBatchProgress(null);
       setExportProgress(null);
     }
   }
@@ -508,6 +652,37 @@ export default function MapView() {
             {BASEMAPS[id].label}
           </button>
         ))}
+      </div>
+
+      {/* Search */}
+      <div className="absolute top-14 left-3 w-56">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
+          onBlur={() => setTimeout(() => setShowSearchResults(false), 150)}
+          placeholder="Search for a place…"
+          className="w-full rounded-lg border border-zinc-300 bg-white/90 px-3 py-1.5 text-xs shadow backdrop-blur placeholder:text-zinc-400 dark:border-zinc-600 dark:bg-black/70 dark:text-zinc-100"
+        />
+        {showSearchResults && (searchResults.length > 0 || searchLoading) && (
+          <div className="mt-1 max-h-64 overflow-y-auto rounded-lg bg-white/95 shadow-lg backdrop-blur dark:bg-black/90">
+            {searchLoading && (
+              <p className="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">Searching…</p>
+            )}
+            {!searchLoading &&
+              searchResults.map((r, i) => (
+                <button
+                  key={i}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => flyToSearchResult(r)}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  {r.label}
+                </button>
+              ))}
+          </div>
+        )}
       </div>
 
       {/* Hint */}
@@ -563,14 +738,24 @@ export default function MapView() {
               {Math.round(((square.rotationDeg % 360) + 360) % 360)}°
             </p>
             {!tooBig && (
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Elevation:{" "}
-                {statsLoading && !elevationStats
-                  ? "…"
-                  : elevationStats
-                  ? `${Math.round(elevationStats.min)}–${Math.round(elevationStats.max)} m`
-                  : "—"}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="flex-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Elevation:{" "}
+                  {statsLoading && !elevationStats
+                    ? "…"
+                    : elevationStats
+                    ? `${Math.round(elevationStats.min)}–${Math.round(elevationStats.max)} m`
+                    : "—"}
+                </p>
+                {previewImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewImage}
+                    alt="Elevation preview"
+                    className="h-10 w-10 shrink-0 rounded border border-zinc-300 object-cover dark:border-zinc-600"
+                  />
+                )}
+              </div>
             )}
             {!tooBig && square.sideKm > 30 && (
               <p className="mb-3 text-xs text-amber-600 dark:text-amber-500">
@@ -696,6 +881,71 @@ export default function MapView() {
         )}
         {!(tilingEnabled && ghostSquare) && <div className="mb-3" />}
 
+        <div className="mb-1 flex items-center gap-1.5">
+          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              checked={batchGridEnabled}
+              onChange={(e) => setBatchGridEnabled(e.target.checked)}
+            />
+            Batch grid export
+          </label>
+          <div className="relative">
+            <button
+              onClick={() => setShowBatchGridInfo((v) => !v)}
+              aria-label="What is batch grid export?"
+              className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-300 text-[10px] font-semibold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              ?
+            </button>
+            {showBatchGridInfo && (
+              <div className="absolute right-0 top-full z-10 mt-2 w-64 rounded-lg bg-white p-3 text-xs leading-relaxed text-zinc-700 shadow-xl dark:bg-zinc-900 dark:text-zinc-300">
+                Exports a whole grid of tiles in one go, starting at the
+                current square (top-left corner) and extending right/down —
+                same size and rotation each tile, bundled into one .zip.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {batchGridEnabled && square && !tooBig && (
+          <div className="mb-3 rounded-md border border-zinc-200 p-2 dark:border-zinc-700">
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+                Rows
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={gridRows}
+                  onChange={(e) => setGridRows(Math.min(5, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-12 rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-600 dark:bg-zinc-900"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+                Cols
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={gridCols}
+                  onChange={(e) => setGridCols(Math.min(5, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-12 rounded border border-zinc-300 bg-white px-1 py-0.5 text-xs dark:border-zinc-600 dark:bg-zinc-900"
+                />
+              </label>
+              <button
+                onClick={handleBatchExport}
+                disabled={batchExporting || exporting}
+                className="ml-auto rounded-md bg-zinc-700 px-2 py-1 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-300 dark:text-black"
+              >
+                {batchExporting
+                  ? `Exporting ${batchProgress?.current ?? 0}/${batchProgress?.total ?? gridRows * gridCols}…`
+                  : `Export ${gridRows}×${gridCols} grid`}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div
           className="relative"
           onMouseEnter={() => setShowExportTooltip(true)}
@@ -703,7 +953,7 @@ export default function MapView() {
         >
           <button
             onClick={handleExport}
-            disabled={!square || tooBig || exporting}
+            disabled={!square || tooBig || exporting || batchExporting}
             className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
           >
             {exporting ? "Exporting…" : "Export"}
@@ -716,7 +966,7 @@ export default function MapView() {
           )}
         </div>
 
-        {exporting && exportProgress && (
+        {(exporting || batchExporting) && exportProgress && (
           <div className="mt-2">
             <div className="mb-1 flex justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
               <span>
