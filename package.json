@@ -4,6 +4,7 @@
   "private": true,
   "description": "Select a region on a map and export a black/white heightmap.",
   "author": "Felix Middelhoff",
+  "desktopName": "com.contour.heightmap.desktop",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
@@ -12,7 +13,8 @@
     "lint": "eslint",
     "electron:dev": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build && electron .",
     "electron:build:win": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --win --publish=never",
-    "electron:build:mac": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --mac --publish=never"
+    "electron:build:mac": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --mac --publish=never",
+    "electron:build:linux": "cross-env NEXT_PUBLIC_IS_DESKTOP=1 next build --webpack && electron-builder --linux --publish=never"
   },
   "dependencies": {
     "maplibre-gl": "^4.7.1",
@@ -55,6 +57,26 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "flatpak"
+      ],
+      "category": "Graphics",
+      "executableName": "contour"
+    },
+    "flatpak": {
+      "runtimeVersion": "25.08",
+      "baseVersion": "25.08",
+      "finishArgs": [
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--share=ipc",
+        "--device=dri",
+        "--share=network",
+        "--filesystem=xdg-download"
+      ]
     },
     "nsis": {
       "oneClick": false,
