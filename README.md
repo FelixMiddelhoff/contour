@@ -14,13 +14,14 @@ Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below
 
 1. **Pick a basemap.** Use the switcher top-left — Streets, Topo, Satellite,
    or Satellite + Relief — to help you find the region you want. These are
-   just for navigation; they aren't part of the exported data.
+   just for navigation; they aren't part of the exported data. Or use the
+   **search box** below it to jump straight to a place by name.
 2. **Select a region.** Hold **Shift** and drag on the map to draw a square.
-   The live size (km × km) and elevation range show in the export panel.
-   Selections are capped at 100 km × 100 km. Bigger regions cover more
-   ground per pixel at the same resolution, so detail drops off as the
-   selection grows — pick a higher resolution or a smaller area for
-   sharper output.
+   The live size (km × km), elevation range, and a small live preview
+   thumbnail show in the export panel. Selections are capped at 100 km ×
+   100 km. Bigger regions cover more ground per pixel at the same
+   resolution, so detail drops off as the selection grows — pick a higher
+   resolution or a smaller area for sharper output.
 3. **Rotate it, if needed.** Drag the green dot at the top of the square to
    rotate the selection to any angle. The exported image is always a plain
    upright square — rotation just changes which ground it covers.
@@ -57,7 +58,13 @@ Built it for importing heightmaps for **Transport Fever 3**. Read furthcer below
      for exporting a region larger than one tile allows and stitching the
      pieces together in a photo editor — since placement is computed
      mathematically rather than dragged by eye, tiles line up perfectly.
-5. Click **Export** to download the file.
+   - **Batch grid export** — a separate opt-in checkbox that exports a
+     whole N×M grid of tiles in one go (current square as the top-left,
+     extending right/down), bundled into a single `.zip`. Independent of
+     tiling mode — use either one on its own, or both together.
+5. Click **Export** to download the file. Progress (tile fetching,
+   resampling, encoding) is shown live, driven by the server's actual
+   progress — not an estimate.
 
 Elevation data comes from the Tilezen/AWS Terrarium tile dataset (free,
 global, no API key). Ocean and other below-sea-level areas are flattened to
@@ -160,6 +167,9 @@ Pushes to `main` auto-deploy to Vercel via the connected GitHub integration.
 
 # Changelog
 
+- **v0.1.7** — Added a location search box (jump to a place by name), a
+  live preview thumbnail of the selection, and batch grid export (export
+  an N×M grid of tiles bundled into one .zip, independent of tiling mode).
 - **v0.1.6** — Export now shows a real live progress bar (tiles fetched,
   resampling, encoding) instead of just a spinner — driven by actual
   server-side progress, not an estimate.
